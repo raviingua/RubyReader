@@ -11,6 +11,12 @@
  *               the single most important property of this app: a gloss read
  *               aloud turns "développé" into "développé developed" and ruins
  *               the sentence
+ *   phonetics — nor does any pronunciation respelling. Same reasoning: "(luh
+ *               kohn-SEHR)" is written for the eye, and a voice reading it
+ *               produces noise in the middle of a vocabulary list
+ *   pos tags  — nor do the grammatical labels on vocabulary entries,
+ *               "(n.f.)", "(expr.)", "(v.)", which interrupt the phrase being
+ *               learned and say nothing a listener needs
  *
  * Usage: node tools/verify_ruby.js <siteDir> <srcDir> [passphrase]
  */
@@ -38,22 +44,29 @@ const words = s => (String(s||'').toLowerCase().normalize('NFD').replace(/[\u030
 
 // Visible text of the source, and separately the gloss text, so the two can be
 // checked in opposite directions.
+const SILENT_CLASS = /\b(pronunciation|prononciation|phonetic|phon[\u00e9e]tique|ipa|respelling)\b/i;
 function sourceText(file){
   const doc = parseXhtml(fs.readFileSync(file,'utf8'), path.basename(file));
   const body = findElement(doc,'body');
-  let visible = '', glosses = '', rubies = 0;
-  (function walk(n, inRt){
-    if(n.type === 'text'){ if(inRt) glosses += ' ' + n.text; else visible += ' ' + n.text; return; }
+  let visible = '', glosses = '', phonetics = '', rubies = 0;
+  (function walk(n, inRt, inPhon){
+    if(n.type === 'text'){
+      if(inRt) glosses += ' ' + n.text;
+      else if(inPhon){ phonetics += ' ' + n.text; visible += ' ' + n.text; }
+      else visible += ' ' + n.text;
+      return;
+    }
     if(n.name === 'script' || n.name === 'style') return;
     if(n.name === 'ruby') rubies++;
     const rt = inRt || n.name === 'rt' || n.name === 'rp';
-    for(const ch of (n.children||[])) walk(ch, rt);
-  })(body, false);
-  return { visible, glosses, rubies };
+    const phon = inPhon || SILENT_CLASS.test((n.attrs && n.attrs.class) || '');
+    for(const ch of (n.children||[])) walk(ch, rt, phon);
+  })(body, false, false);
+  return { visible, glosses, phonetics, rubies };
 }
 
 let fails = 0;
-console.log('book'.padEnd(44) + 'integ  coverage        ruby kept   glosses spoken');
+console.log('book'.padEnd(38) + 'integ coverage      ruby kept  gloss  phon   pos (spoken/shown)');
 for(const b of man.books){
   const book = decrypt(b.file);
   const src = sourceText(path.join(SRC, b.source));
@@ -91,18 +104,44 @@ for(const b of man.books){
   // must not appear in the speech text. Words shared with the base text can't
   // be attributed either way, so they're excluded from the test.
   const visSet = new Set(srcWords);
-  const glossOnly = [...new Set(words(src.glosses))].filter(w => !visSet.has(w));
   const spokenSet = new Set(words(outSpeech));
+  const glossOnly = [...new Set(words(src.glosses))].filter(w => !visSet.has(w));
   const leaked = glossOnly.filter(w => spokenSet.has(w));
 
-  const ok = integrity === 0 && covPct > 99 && rubyPct > 99 && leaked.length === 0;
+  // Respellings: a word that appears inside a pronunciation element and never
+  // in ordinary prose must not be spoken. Words shared with the running text
+  // can't be attributed either way, so they're excluded from the test.
+  const plainWords = new Set(words(src.visible.split(/\s+/).join(' ')));
+  const phonWordCounts = new Map();
+  for(const w of words(src.phonetics)) phonWordCounts.set(w, (phonWordCounts.get(w)||0)+1);
+  const plainOnly = new Set(words(src.visible));
+  for(const w of phonWordCounts.keys()) plainOnly.delete(w);
+  const phonOnly = [...phonWordCounts.keys()].filter(w => !plainOnly.has(w) && !visSet.has(w) || false);
+  // A respelling word is "phonetic-only" when every occurrence of it in the
+  // source is inside a pronunciation element.
+  const visCounts = new Map();
+  for(const w of words(src.visible)) visCounts.set(w, (visCounts.get(w)||0)+1);
+  const phonExclusive = [...phonWordCounts.keys()]
+    .filter(w => (visCounts.get(w)||0) <= phonWordCounts.get(w));
+  const phonLeaked = phonExclusive.filter(w => spokenSet.has(w));
+
+  // Part-of-speech labels: shown in the HTML, absent from the speech text.
+  const POS = /(^|\s)\((?:[A-Za-z]{1,6}\.(?:\s?[A-Za-z]{1,4}\.)*)\)/g;
+  const posShown = (outHtml.replace(/<[^>]+>/g,' ').match(POS) || []).length;
+  const posSpoken = (outSpeech.match(POS) || []).length;
+
+  const ok = integrity === 0 && covPct > 99 && rubyPct > 99 &&
+             leaked.length === 0 && phonLeaked.length === 0 && posSpoken === 0;
   if(!ok) fails++;
   console.log(
-    b.id.slice(0,42).padEnd(44) +
-    String(integrity).padEnd(7) +
-    (covered+'/'+srcUniq.length+' '+covPct.toFixed(1)+'%').padEnd(16) +
-    (outRubies+'/'+src.rubies+' '+rubyPct.toFixed(1)+'%').padEnd(12) +
-    (leaked.length ? leaked.length+' LEAKED: '+leaked.slice(0,5).join(',') : '0 of '+glossOnly.length+' gloss-only words') +
+    b.id.slice(0,36).padEnd(38) +
+    String(integrity).padEnd(6) +
+    (covered+'/'+srcUniq.length+' '+covPct.toFixed(1)+'%').padEnd(15) +
+    (outRubies+'/'+src.rubies+' '+rubyPct.toFixed(1)+'%').padEnd(11) +
+    (leaked.length ? leaked.length+' LEAKED: '+leaked.slice(0,5).join(',') : '0/'+glossOnly.length+' gloss') +
+    '  ' +
+    (phonLeaked.length ? phonLeaked.length+' LEAKED: '+phonLeaked.slice(0,5).join(',') : '0/'+phonExclusive.length+' phon') +
+    '  ' + posSpoken + '/' + posShown + ' pos' +
     (ok ? '' : '   <-- CHECK'));
   if(covPct <= 99){
     const miss = srcUniq.filter(w => !outWords.has(w)).slice(0,8);

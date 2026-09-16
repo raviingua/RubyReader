@@ -147,6 +147,122 @@ function classLang(el, inherited){
 }
 function classOf(el){ return (el.attrs && el.attrs.class) || ''; }
 
+// Elements that are DISPLAYED but never SPOKEN. Pronunciation respellings —
+// "(luh kohn-SEHR)", "lah fee-loh-zoh-FEE" — are written for the eye; read
+// aloud by a French or English voice they are nonsense, and in the
+// pronunciation book they sit inline in every vocabulary list and exercise.
+// This is the same rule already applied to ruby glosses and to table columns
+// headed "Pronunciation"; it just needed to follow the class as well, since
+// these books mark it up as <span class="pronunciation">, <td
+// class="pronunciation"> and, inside list items, <p class="pronunciation">.
+const SILENT_CLASS = /\b(pronunciation|prononciation|phonetic|phon[ée]tique|ipa|respelling)\b/i;
+function isSilent(el){ return SILENT_CLASS.test(classOf(el)); }
+
+/* Unmarked respellings.
+ * The pronunciation book also writes respellings with no class at all, as the
+ * right-hand side of an arrow inside exercises:
+ *     <li>la musique → lah-mew-ZEEK</li>
+ *     <li>Le streaming a transformé…<br/> → luh STREE-meeng ah kohn-plet-MAHN…</li>
+ * Nothing in the markup distinguishes those from ordinary text, so they are
+ * recognised by their shape: a hyphenated token containing an ALL-CAPS
+ * syllable, in plain ASCII.
+ *
+ * The rule is deliberately biased toward under-silencing. A hyphen part that
+ * is a real word of four letters or more means the token is a genuine term
+ * ("debt-to-GDP", "TEF-style") and is left alone. Checked against every such
+ * token in all four books — 751 of them — this silences 713 and keeps 38, and
+ * of those 38 the only true words are "debt-to-GDP" and the verb endings -ER,
+ * -IR, -RE. The rest are respellings that happen to contain "tree", "pray" or
+ * "sweet" and stay spoken: a miss, which is the safe direction to fail in.
+ */
+const RESPELL_MIN_WORD = 4;
+let RESPELL_KNOWN = null;
+function knownWords(){
+  if(!RESPELL_KNOWN){
+    RESPELL_KNOWN = new Set([...LE.FR_FUNCTION, ...LE.FR_LEXICON,
+      ...LE.EN_FUNCTION, ...LE.EN_LEXICON, ...LE.NEUTRAL, ...LE.GEN_FR, ...LE.GEN_EN]);
+  }
+  return RESPELL_KNOWN;
+}
+function isRespellingToken(w){
+  if(!/-/.test(w) || !/[A-Z]{2,}/.test(w) || !/[a-z]/.test(w)) return false;
+  if(/[\u00c0-\u00ff]/.test(w)) return false;        // respellings are plain ASCII
+  const k = knownWords();
+  return !w.split('-').some(p => p.length >= RESPELL_MIN_WORD && k.has(p.toLowerCase()));
+}
+/* Part-of-speech tags.
+ * Vocabulary entries carry a grammatical label that is written for the eye and
+ * adds nothing to the ear: "il est important que (expr.)", "la souveraineté
+ * (n.f.)", "que je puisse (v.)". Spoken, they interrupt the phrase being
+ * learned with "expression", "en eff", "vee".
+ *
+ * Recognised by shape rather than by a fixed list: a parenthetical made only
+ * of short letter-groups each ending in a dot. Checked across all four books,
+ * that matches exactly fourteen distinct tags — n.f., n.m., v., expr., adj.,
+ * f., m., f.pl., n., m.pl., adv., n.f.pl., prov., n.m.pl. — 1,758 occurrences,
+ * with nothing else caught at all.
+ *
+ * Two deliberate limits. The parenthetical must stand on its own (preceded by
+ * a space or the start of the line), so the feminine-ending marker in
+ * "américain(e)" is untouched — it is part of the word, not a label. And
+ * abbreviations that carry meaning are excluded outright, so a future book
+ * that writes "(cf.)" or "(i.e.)" still reads them.
+ */
+const POS_TAG = /(^|\s)\(([A-Za-z]{1,6}\.(?:\s?[A-Za-z]{1,4}\.)*)\)/g;
+const POS_KEEP = new Set(['etc.','i.e.','e.g.','cf.','p.ex.','ex.','nb.','ca.','vs.']);
+function stripPosTags(text){
+  if(!text || text.indexOf('(') < 0) return text;
+  return text.replace(POS_TAG, (m, pre, body) =>
+    POS_KEEP.has(body.toLowerCase().replace(/\s/g,'')) ? m : pre)
+    // The label often sits before a comma; removing it would otherwise leave
+    // the comma floating a space away from the word it belongs to.
+    .replace(/\s+([,.])/g, '$1')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+// Strip respellings from a line, then ask whether what is left is actually
+// language. "télécharger tay-lay-shahr-ZHAY" leaves "télécharger", which is
+// worth hearing. "luh STREE-meeng ah kohn-plet-MAHN trahnss-fohr-MAY lah
+// fah-SOHN dohn ohn" leaves "luh ah lah dohn ohn" — the unhyphenated
+// syllables of the same respelling — which is not, so the line goes silent
+// altogether. This replaced a fixed "mostly respelling" ratio, which got both
+// of those cases wrong in opposite directions.
+function looksLikeLanguage(tokens){
+  const k = knownWords();
+  return tokens.some(t => {
+    const w = t.replace(/[^A-Za-z\u00c0-\u00ff']/g,'');
+    if(w.length < 3) return false;
+    if(/[\u00c0-\u00ff]/.test(w)) return true;       // accents are always real French
+    if(k.has(w.toLowerCase())) return true;
+    // Length alone, because lexicon membership is not enough here: the word
+    // lists deliberately exclude cognates, so "concert" is in neither of them
+    // and "le concert luh-kohn-SEHR" was silenced whole. The leftover
+    // syllables of a respelling ("luh", "ah", "lah", "dohn", "ohn") are short;
+    // a real word that carries a line usually isn't.
+    return w.length >= 5;
+  });
+}
+// Everything that is displayed but not spoken, in one place.
+function speechClean(text){ return stripRespellings(stripPosTags(text)); }
+
+function stripRespellings(text){
+  if(!text) return text;
+  const parts = text.split(/(\s+)/);
+  const kept = [], dropped = [];
+  let any = false;
+  for(const p of parts){
+    if(!/[A-Za-z]/.test(p)){ kept.push(p); continue; }
+    if(isRespellingToken(p.replace(/^[^A-Za-z-]+|[^A-Za-z-]+$/g,''))){ any = true; dropped.push(p); continue; }
+    kept.push(p);
+  }
+  if(!any) return text;
+  const rest = kept.filter(p => /[A-Za-z\u00c0-\u00ff]/.test(p));
+  if(!looksLikeLanguage(rest)) return '';
+  return kept.join('').replace(/\s+/g,' ').trim();
+}
+
+
 function textOf(node){
   if(node.type === 'text') return node.text;
   if(node.name === 'rt') return '';            // a gloss is never part of the text
@@ -168,6 +284,12 @@ function inlineTokens(node, out, style){
     }
     const n = ch.name;
     if(n === 'rt' || n === 'rp') continue;                      // handled by the ruby branch
+    if(isSilent(ch)){
+      // Shown exactly as written, contributing nothing to the speech text.
+      // Atomic so no sentence split can land inside it.
+      out.push({ speech: '', html: serializeChild(ch), style: style, atomic: true });
+      continue;
+    }
     if(n === 'ruby'){
       // Atomic: never split a word away from its gloss.
       out.push({ speech: textOf(ch), html: serializeRuby(ch), style: style, atomic: true });
@@ -290,7 +412,7 @@ function segmentTokens(tokens, seed, force){
   return segs.map(s => ({
     lang: s.lang,
     html: s.pieces.map(p => wrapStyled(p.html, p.style)).join(''),
-    text: speechText(s.pieces.map(p => p.speech).join(''))
+    text: speechClean(speechText(s.pieces.map(p => p.speech).join('')))
   })).filter(s => s.html !== '');
 }
 
@@ -308,8 +430,13 @@ function renderSegs(segs, counter, out){
 function buildInlineBlock(el, type, ctx, extra){
   const segs = [], counter = { n:0 };
   const force = classLang(el, ctx.lang);
-  const html = renderSegs(segmentTokens(inlineTokens(el, [], 'plain'), ctx.seed, force), counter, segs);
-  if(!segs.length) return null;
+  // A whole block marked as pronunciation is shown and skipped, not dropped:
+  // returning null here would delete it from the page as well as from the
+  // audio, and the respelling is the thing that paragraph exists to show.
+  const html = isSilent(el)
+    ? serializeInlineHtml(el)
+    : renderSegs(segmentTokens(inlineTokens(el, [], 'plain'), ctx.seed, force), counter, segs);
+  if(!segs.length && !html.trim()) return null;
   const block = Object.assign({ type: type, html: html, segs: segs }, extra || {});
   if(ctx.quote) block.quote = true;
   if(ctx.box) block.box = ctx.box;
@@ -334,7 +461,7 @@ function buildListBlock(el, ctx){
     lines.push({ raw: speechOf(li), segFrom: from, segTo: counter.n - 1 });
   }
   html += '</'+(ordered ? 'ol' : 'ul')+'>';
-  if(!segs.length) return null;
+  if(!segs.length && !lines.length) return null;
   const block = { type:'list', ordered: ordered || undefined, listType: type || undefined,
                   html: html, segs: segs };
   if(ctx.quote) block.quote = true;
@@ -374,7 +501,7 @@ function buildTableBlock(el, ctx){
     html += '<tr>';
     cells.forEach((cell, cx) => {
       const tag = cell.name === 'th' ? 'th' : 'td';
-      if(!isHead && skipCol[cx]){
+      if(!isHead && (skipCol[cx] || isSilent(cell))){
         html += '<'+tag+' class="noSpeak">'+serializeInlineHtml(cell)+'</'+tag+'>';
         return;
       }
@@ -386,7 +513,7 @@ function buildTableBlock(el, ctx){
     if(!isHead) rowMap.push({ cells: cells.map(speechOf), segFrom: from, segTo: counter.n - 1 });
   });
   html += '</table>';
-  if(!segs.length) return null;
+  if(!segs.length && !rowMap.length) return null;
   const block = { type:'table', html: html, segs: segs };
   if(ctx.quote) block.quote = true;
   if(ctx.box) block.box = ctx.box;
@@ -647,10 +774,16 @@ function collectGroups(book){
 
 function answerPayload(text){
   const segs = LE.segmentLine(String(text || '').replace(/\s+/g,' ').trim(), null);
+  // Exercise answers get the same treatment for SPEECH only: in the
+  // pronunciation book the printed answer to "la musique → ___" IS the
+  // respelling, and reading it out is noise. It still has to be SHOWN,
+  // though — silencing it out of existence turned 20 real answers into "this
+  // book doesn't print an answer for this one", which is simply false.
   return {
     html: segs.map(s => s.html).join('') || escapeHtml(String(text || '')),
-    segs: segs.filter(s => s.text && s.text.trim()).map(s => ({ lang: s.lang, text: s.text })),
-    text: segs.map(s => s.text).filter(Boolean).join(' ')
+    text: segs.map(s => s.text).filter(Boolean).join(' '),
+    segs: segs.map(s => ({ lang: s.lang, text: speechClean(s.text) }))
+              .filter(s => s.text && s.text.trim())
   };
 }
 

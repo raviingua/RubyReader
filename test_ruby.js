@@ -140,7 +140,8 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   const glossBtn = doc.getElementById('glossBtn');
   check(/On$/.test(glossBtn.textContent), 'glosses default to shown');
   glossBtn.click();
-  check(doc.getElementById('blockEl').classList.contains('rbGlossOff'), 'hiding glosses adds the class');
+  check(doc.getElementById('textInner').classList.contains('rbGlossOff'),
+        'hiding glosses applies to the whole stage, not just the current block');
   check(doc.querySelectorAll('#blockEl ruby').length === rubies.length,
         'hiding glosses leaves the words themselves in place');
   spoken.length = 0;
@@ -148,7 +149,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   await sleep(STUB_MS*20);
   check(spoken.length > 0, 'reading is unaffected by hiding the glosses');
   glossBtn.click();
-  check(!doc.getElementById('blockEl').classList.contains('rbGlossOff'), 'glosses come back');
+  check(!doc.getElementById('textInner').classList.contains('rbGlossOff'), 'glosses come back');
 
   // ---- per-language voices still work ----
   const rates = new Set(spoken.map(s => s.lang));

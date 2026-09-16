@@ -24,7 +24,8 @@ all their tests still pass.
 | `tools/verify_ruby.js` | Checks a built library: integrity, coverage, ruby, gloss leakage. | No |
 | `tools/audit_report.py` | Flags likely mis-tagged segments. | No |
 | `test_ruby.js` | 20 checks for the reader (needs `npm i jsdom`). | No |
-| `test_exercise.js` | Exercise-mode checks; runs against either app. | No |
+| `test_exercise.js` | Exercise-mode checks; runs against either app. |
+| `test_chapterview.js` | Whole-chapter view checks; runs against either app. | No |
 
 `lang_engine.js` is a **separate copy** of the tagger the Markdown builder
 uses. That is deliberate: it means work on this app cannot change the
@@ -98,6 +99,86 @@ on ruby bases too. Without that, a whole interlinear paragraph came out as one
 segment — no sentence-level highlighting, and pausing replayed the entire
 paragraph instead of the sentence being read.
 
+## Pronunciation respellings
+
+Respellings — "(luh kohn-SEHR)", "lah fee-loh-zoh-FEE" — are written for the
+eye. Read aloud by any voice they are noise, so they are **displayed and never
+spoken**, the same treatment ruby glosses get. Three forms appear in your
+books and all three are handled:
+
+- **Marked up**: `<span class="pronunciation">`, `<td class="pronunciation">`,
+  and — inside list items — `<p class="pronunciation">`. Any element whose
+  class says pronunciation/phonetic/IPA is display-only.
+- **A column headed "Pronunciation"** in a table (this was already the case).
+- **Unmarked**, which is where the pronunciation book's exercises live:
+  `<li>la musique → lah-mew-ZEEK</li>`. Nothing in the markup distinguishes
+  these, so they are recognised by shape — a hyphenated token with an ALL-CAPS
+  syllable, in plain ASCII.
+
+The shape rule is deliberately biased toward **under**-silencing. A hyphen part
+that is a real word of four letters or more means the token is a genuine term
+("debt-to-GDP", "TEF-style") and is left alone. Checked against all 751 such
+tokens across the four books, it silences 713 and keeps 38 — and of those 38
+the only true words are `debt-to-GDP` and the verb endings `-ER`, `-IR`, `-RE`.
+The rest are respellings that happen to contain "tree", "pray" or "sweet" and
+stay spoken. Missing a few is much better than silencing a real word.
+
+After stripping, what remains is checked to see whether it is actually
+language. "télécharger tay-lay-shahr-ZHAY" leaves "télécharger", worth hearing;
+"luh STREE-meeng ah kohn-plet-MAHN trahnss-fohr-MAY lah fah-SOHN dohn ohn"
+leaves only the unhyphenated syllables of the same respelling, so that line
+goes silent altogether.
+
+Exercise answers get the same treatment **for speech only**. In the
+pronunciation book the printed answer often *is* the respelling, so it still
+has to be shown — silencing it out of existence would turn 20 real answers
+into "this book doesn't print an answer for this one", which is false.
+
+Across the four books: **6,633 respellings displayed, 65 still spoken** (99%
+removed), and those 65 are the deliberate misses above.
+
+## Part-of-speech labels
+
+Vocabulary entries carry a grammatical label written for the eye — "il est
+important que **(expr.)**", "la souveraineté **(n.f.)**", "que je puisse
+**(v.)**". Spoken, they interrupt the phrase being learned with "expression",
+"en eff", "vee", so they are displayed and not read.
+
+Recognised by shape rather than a fixed list: a parenthetical made only of
+short letter-groups each ending in a dot. Across the four books that matches
+exactly fourteen distinct tags — `n.f.` `n.m.` `v.` `expr.` `adj.` `f.` `m.`
+`f.pl.` `n.` `m.pl.` `adv.` `n.f.pl.` `prov.` `n.m.pl.` — **1,758 occurrences,
+with nothing else caught at all.**
+
+Two limits keep it safe. The parenthetical must stand on its own, preceded by a
+space or the start of the line, so the feminine-ending marker in
+"américain(e)" is untouched — that is part of the word, not a label. And
+abbreviations that carry meaning (`etc.` `i.e.` `e.g.` `cf.` `p.ex.` `vs.`)
+are excluded outright, so a future book that uses them still reads them.
+
+Result: **1,758 labels displayed, 0 spoken.**
+
+### Whole-chapter view
+
+A **View: Block / Chapter** pill. On **Chapter**, the whole chapter is on one
+scrollable page with the block being read marked by an accent bar — useful for
+working an exercise with the surrounding explanation still visible, or for any
+time you want more context than one paragraph.
+
+**Nothing about reading changes.** It is a rendering change only: playback
+still moves block by block, highlighting is still per segment, exercise mode
+still stops for input, and the per-language voices and speeds are untouched.
+The current block keeps `id="blockEl"` in both views, which is what lets the
+whole player go on working without knowing which view it is in.
+
+Blocks are deliberately **not** dimmed. The point of this view is reading the
+context while you answer, and greying it would defeat that.
+
+The page is built once per chapter, so moving from block to block only moves
+the marker and scrolls — a long chapter is not rebuilt on every sentence, and
+your scroll position survives. The largest chapter in these books is 224
+blocks / 71 KB of HTML, which a browser renders without noticing.
+
 ## Two chapter dropdowns
 
 h1, h2 and h3 are **all** chapters, which in these books means up to 1,155 of
@@ -131,6 +212,18 @@ Identical to the Markdown app: reading stops at each question, takes a typed
 attempt, then shows and reads the answer **the book itself prints**. Nothing is
 graded. Pairing is done at build time and only on an explicit key, with
 ambiguity treated as failure.
+
+### Working an exercise from the keyboard
+
+Type, **Enter** to check, **Enter** again for the next question — the whole
+exercise runs without the mouse. The cursor is placed in the answer box when a
+question appears, and moves to **Next** once the answer is shown, so Enter
+always has something to act on. Space does the same as Enter while the panel is
+open, and Shift+Enter is still a newline for the longer writing tasks.
+
+The cursor is not auto-placed on a coarse-pointer (touch) device, where it
+would throw an on-screen keyboard over the text; tap the box instead.
+
 
 These XHTML books give a much better key than the Markdown ones: **the answer
 side repeats the question's heading verbatim.**
