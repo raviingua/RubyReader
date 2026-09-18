@@ -330,17 +330,9 @@
   .textDisplay.bookMode .rbTableWrap,
   .textDisplay.bookMode .rbArt{break-inside:auto}
 
-  /* Page turners. Slim, low-contrast strips pinned to the edges — findable
-     when looked for, invisible when reading. They sit above the text but only
-     take clicks on themselves, so the tap zones underneath still work. */
-  .pageArrow{position:absolute;top:0;bottom:0;width:min(11%,64px);z-index:4;
-    display:none;align-items:center;justify-content:center;
-    background:none;color:var(--stext);opacity:.16;font-size:26px;line-height:1;
-    transition:opacity .15s}
-  .pageArrow:hover,.pageArrow:active{opacity:.6}
-  .pageArrow.prev{left:0}
-  .pageArrow.next{right:0}
-  .bookOn .pageArrow{display:flex}
+  /* No on-screen page arrows: pages are turned with the arrow keys or a
+     double-tap at the left or right of the page, and anything permanently
+     drawn over the text is a distraction from reading it. */
   .pageInd{position:absolute;left:50%;bottom:6px;transform:translateX(-50%);z-index:4;
     display:none;gap:8px;align-items:center;
     font-size:11px;color:var(--stext);opacity:.45;font-variant-numeric:tabular-nums;
@@ -517,8 +509,6 @@
       <button class="pill icon hideToggle" id="hideBtn" title="Hide all controls">⤢</button>
       <div class="chapterToast" id="chapterToast"></div>
       <div class="textDisplay" id="textDisplay"><div class="inner" id="textInner"></div></div>
-      <button class="pageArrow prev" id="pagePrev" title="Previous page">&#8249;</button>
-      <button class="pageArrow next" id="pageNext" title="Next page">&#8250;</button>
       <div class="pageInd" id="pageInd">
         <span id="pageNum">1 / 1</span>
         <button class="findBtn" id="pageFind" title="Go to the page being read">reading &#8250;</button>
@@ -912,7 +902,7 @@
     setupMode=v;
     $('colsField').style.display = (v==='book') ? '' : 'none';
     $('modeHint').textContent = (v==='book')
-      ? 'Book: the chapter set in columns, one screenful at a time. Turn pages with the arrow keys, the edge arrows, or a double-tap at the left or right of the page. Pages never turn on their own.'
+      ? 'Book: the chapter set in columns, one screenful at a time. Turn pages with the arrow keys, or a double-tap at the left or right of the page. Pages never turn on their own.'
       : 'Scroll: one block at a time, or the whole chapter, scrolling as usual.';
   });
   seg('colsSeg', function(v){ setupCols=parseInt(v,10)||1; });
@@ -1432,8 +1422,6 @@
     btn.classList.toggle('away', away);
     btn.textContent = away ? ('reading p'+(rp+1)) : 'reading here';
   }
-  $('pagePrev').addEventListener('click', function(e){ e.stopPropagation(); prevPage(); });
-  $('pageNext').addEventListener('click', function(e){ e.stopPropagation(); nextPage(); });
   $('pageFind').addEventListener('click', function(e){
     e.stopPropagation();
     var rp=readingPage();
