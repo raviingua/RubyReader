@@ -132,6 +132,13 @@
      the point of this view is an uninterrupted page, and a red circle floating
      over it defeats that. Hidden until the controls are. */
   .fsPlay{position:absolute;top:8px;right:54px;z-index:6;display:none}
+  /* Bottom-centre placement. Still the same outline pill — only a little
+     larger, because at the bottom of the page it is further from the thumb's
+     resting position and there is nothing beside it to judge its size against.
+     It floats over the text rather than reserving space, so a line may pass
+     underneath it; it sits clear of the book-mode page indicator. */
+  .fsPlay.pos-bottom{top:auto;right:auto;bottom:26px;left:50%;transform:translateX(-50%);
+    padding:9px 20px;font-size:17px;border-radius:12px}
   .fsPlay.on{display:block}
   .stage[data-light="1"] .fsPlay{background:rgba(255,255,255,.65);color:#333;border-color:#ccc}
   .stage[data-light="1"] .hideToggle{background:rgba(255,255,255,.65);color:#333;border-color:#ccc}
@@ -319,10 +326,11 @@
      block as always and may well walk off the visible page; the page stays put
      until you turn it. */
   .textDisplay.bookMode{overflow:hidden;display:block;padding:44px 4% 40px;scroll-behavior:auto}
+  /* column-count, column-gap and width are set from script: they have to be
+     exact pixel values for the page arithmetic to line up, which a stylesheet
+     cannot express. Only what is constant lives here. */
   .textDisplay.bookMode .inner{
     height:100%;margin:0;
-    column-count:var(--cols,1);
-    column-gap:3.2em;
     column-fill:auto;
     column-rule:1px solid rgba(128,128,128,.22);
   }
@@ -394,6 +402,7 @@
     .textDisplay{padding:52px 6% 16px}
     .hideToggle{top:4px;right:6px;padding:5px 8px;font-size:11px}
     .fsPlay{top:4px;right:44px;padding:5px 8px;font-size:11px}
+    .fsPlay.pos-bottom{top:auto;right:auto;bottom:22px;padding:8px 17px;font-size:15px}
   }
 </style>
 </head>
@@ -421,6 +430,9 @@
     <div class="field" id="passField" style="display:none"><label>Password</label>
       <input type="password" id="bookPass" placeholder="Passphrase for your books" autocomplete="off">
       <label class="remember"><input type="checkbox" id="bookRemember"> Remember on this device</label>
+    </div>
+    <div class="field"><label>Play button when controls are hidden</label>
+      <div class="seg" id="fsPosSeg"><button data-v="top" class="sel">Top right</button><button data-v="bottom">Bottom centre</button></div>
     </div>
     <div class="field"><label>Reading mode</label>
       <div class="seg" id="modeSeg"><button data-v="scroll" class="sel">Scroll</button><button data-v="book">Book</button></div>
@@ -710,10 +722,10 @@
     // opened. Book mode implies whole-chapter view — a paged single block
     // would be a page with one paragraph on it.
     if(setupMode==='book' && !bookMode){
-      bookMode=true; cols=setupCols; viewAll=true;
+      bookMode=true; viewAll=true; page=0;
       applyViewBtn(); renderedMode=null;
     } else if(setupMode==='scroll' && bookMode){
-      bookMode=false; applyBookMode(); renderedMode=null;
+      bookMode=false; applyBookMode(false); renderedMode=null;
     }
     var c=content.chapters[ci];
     if(!c){ $('err').textContent='Chapter not found.'; return; }
@@ -892,9 +904,30 @@
   }
   function syncStageTheme(){ var c=stagePalette(resolvedTheme()); applyPalette(c[0],c[1]); }
   function applyAppTheme(){ document.documentElement.setAttribute('data-theme', appTheme==='auto' ? (systemPrefersDark()?'dark':'light') : appTheme); syncStageTheme(); }
+  // Mark a segmented control's current value — needed to restore a remembered
+  // choice, since seg() only tracks clicks.
+  function segSelect(id,v){
+    var ch=$(id).children;
+    for(var i=0;i<ch.length;i++) ch[i].classList.toggle('sel', ch[i].dataset.v===v);
+  }
   function seg(id,cb){ $(id).addEventListener('click',function(e){ var b=e.target.closest('button'); if(!b)return;
     var ch=$(id).children; for(var i=0;i<ch.length;i++)ch[i].classList.remove('sel'); b.classList.add('sel'); cb(b.dataset.v); }); }
   seg('themeSeg',function(v){ appTheme=v; applyAppTheme(); });
+
+  /* ---- where the hidden-controls play button sits ----
+     Top right by default, beside the button that brings the controls back.
+     Bottom centre puts it under the thumb instead, which suits reading a page
+     one-handed. Remembered between sessions, since it is a physical
+     preference rather than something to re-pick per book. */
+  var fsPlayPos='top';
+  function applyFsPlayPos(){
+    $('fsPlayBtn').classList.toggle('pos-bottom', fsPlayPos==='bottom');
+    try{ localStorage.setItem('fsPlayPos', fsPlayPos); }catch(e){}
+  }
+  try{ var fp=localStorage.getItem('fsPlayPos'); if(fp==='top'||fp==='bottom') fsPlayPos=fp; }catch(e){}
+  seg('fsPosSeg', function(v){ fsPlayPos=v; applyFsPlayPos(); });
+  segSelect('fsPosSeg', fsPlayPos);
+  applyFsPlayPos();
 
   // ---- reading mode / columns, chosen before the chapter opens ----
   var setupMode='scroll', setupCols=1;
@@ -905,7 +938,16 @@
       ? 'Book: the chapter set in columns, one screenful at a time. Turn pages with the arrow keys, or a double-tap at the left or right of the page. Pages never turn on their own.'
       : 'Scroll: one block at a time, or the whole chapter, scrolling as usual.';
   });
-  seg('colsSeg', function(v){ setupCols=parseInt(v,10)||1; });
+  // Applied at once rather than only on the next chapter open: with the old
+  // code, changing this after a book was already open did nothing at all,
+  // because the mode had already been switched on and the column count was
+  // only read at that moment.
+  seg('colsSeg', function(v){
+    setupCols=parseInt(v,10)||1;
+    cols=setupCols;
+    page=0;
+    if(bookMode) applyBookMode(false); else $('colsBtn').textContent='Cols: '+cols;
+  });
 
   if(window.matchMedia){ try{ window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change',function(){ if(appTheme==='auto')applyAppTheme(); }); }catch(e){} }
   applyAppTheme();
@@ -1382,24 +1424,90 @@
      opposite page, without the layout moving under you. */
   var bookMode=false, cols=1, page=0, pageCount=1;
 
-  function pageWidth(){
-    var el=$('textDisplay');
-    return el.clientWidth || 1;
+  /* ---- pagination ----
+     The first version leaned on multi-column "overflow columns": give the box
+     a fixed height and let columns past the last visible one spill to the
+     right, then read scrollWidth to count pages. That works with two or more
+     columns but NOT with one — browsers treat column-count:1 as an ordinary
+     block and overflow it downwards instead of sideways, so scrollWidth stayed
+     equal to the page width, every chapter measured as a single page, and the
+     next-page key did nothing.
+
+     So nothing is left to spill now. The column box is made explicitly wide
+     enough to hold every column the chapter needs, and the page count comes
+     from where the content actually ends rather than from scrollWidth:
+
+       column width  colW  = (pageW - (cols-1)*gap) / cols
+       box width     W     = pages*(pageW+gap) - gap
+
+     With column-count set to pages*cols, that width divides into exactly that
+     many columns of exactly colW — so column k*cols always starts precisely
+     one page-step in from column (k-1)*cols, and a page turn is a scroll of
+     pageW+gap. It behaves identically for one column and for four.
+
+     `pages` is found by laying out, measuring where the last block ends, and
+     growing if the content reached the end of the box. A handful of reflows
+     per chapter, and none while reading. */
+  var pageStep=1;
+  function pageMetrics(){
+    var host=$('textDisplay');
+    var cs=window.getComputedStyle ? window.getComputedStyle(host) : null;
+    var padL=cs ? (parseFloat(cs.paddingLeft)||0) : 0;
+    var padR=cs ? (parseFloat(cs.paddingRight)||0) : 0;
+    var pageW=(host.clientWidth||0)-padL-padR;
+    var gap=Math.round(Math.min(48, Math.max(18, pageW*0.05)));
+    return { pageW: pageW, gap: gap, step: pageW+gap };
   }
-  function measurePages(){
-    var el=$('textDisplay');
-    if(!bookMode){ pageCount=1; return; }
-    var w=pageWidth();
-    // scrollWidth reports the full columnised extent even though the box is
-    // overflow:hidden, which is what makes this measurable at all.
-    pageCount=Math.max(1, Math.ceil((el.scrollWidth - 2) / w));
+  // How far into the column box the content actually reaches. Measured from
+  // the box's own left edge, so it is unaffected by the current scroll.
+  function contentEndX(){
+    var inner=$('textInner');
+    var els=inner.querySelectorAll('[data-blk]');
+    if(!els.length) return 0;
+    var left=inner.getBoundingClientRect().left;
+    var end=0;
+    // The last block is normally the furthest, but a table or figure allowed
+    // to break across columns can end beyond it, so the tail is checked.
+    for(var i=Math.max(0, els.length-6); i<els.length; i++){
+      var r=els[i].getBoundingClientRect().right-left;
+      if(r>end) end=r;
+    }
+    return end;
+  }
+  function layoutPages(){
+    var inner=$('textInner');
+    if(!bookMode){
+      inner.style.width=''; inner.style.columnCount=''; inner.style.columnGap='';
+      pageCount=1; pageStep=1;
+      return;
+    }
+    var m=pageMetrics();
+    if(m.pageW<=0){ pageCount=1; pageStep=1; return; }   // not laid out yet
+    pageStep=m.step;
+    function setBox(p){
+      inner.style.columnGap=m.gap+'px';
+      inner.style.columnCount=String(Math.max(1, p*cols));
+      inner.style.width=(p*m.step-m.gap)+'px';
+    }
+    var pages=Math.max(2, pageCount||2), used=0;
+    for(var t=0; t<8; t++){
+      setBox(pages);
+      used=contentEndX();
+      // Room to spare at the end means every column the chapter needs exists.
+      if(used <= pages*m.step-m.gap-2) break;
+      pages=Math.max(Math.ceil(used/m.step)+1, pages*2);
+    }
+    var need=Math.max(1, Math.ceil((used-1)/m.step));
+    setBox(need);
+    pageCount=need;
   }
   function showPage(n, smooth){
     var el=$('textDisplay');
-    measurePages();
     page=Math.max(0, Math.min(n, pageCount-1));
-    try{ el.scrollTo({ left: page*pageWidth(), behavior: smooth ? 'smooth' : 'auto' }); }
-    catch(e){ el.scrollLeft = page*pageWidth(); }
+    var left=page*pageStep;
+    try{ el.scrollTo({ left: left, behavior: smooth ? 'smooth' : 'auto' }); }
+    catch(e){ el.scrollLeft=left; }
+    if(el.scrollLeft !== left) el.scrollLeft=left;
     updatePageInd();
   }
   function nextPage(){ if(bookMode) showPage(page+1, true); }
@@ -1408,10 +1516,9 @@
   // button, never to move the page by itself.
   function readingPage(){
     var el=$('blockEl');
-    if(!el || !bookMode) return -1;
-    var host=$('textDisplay');
-    var left=el.getBoundingClientRect().left - host.getBoundingClientRect().left + host.scrollLeft;
-    return Math.max(0, Math.floor(left / pageWidth()));
+    if(!el || !bookMode || pageStep<=1) return -1;
+    var x=el.getBoundingClientRect().left-$('textInner').getBoundingClientRect().left;
+    return Math.max(0, Math.floor(x/pageStep));
   }
   function updatePageInd(){
     if(!bookMode) return;
@@ -1427,26 +1534,32 @@
     var rp=readingPage();
     if(rp>=0) showPage(rp, true);
   });
-
-  function applyBookMode(){
+  function applyBookMode(keepPage){
     $('textDisplay').classList.toggle('bookMode', bookMode);
     $('stage').classList.toggle('bookOn', bookMode);
     $('colsBtn').style.display = bookMode ? '' : 'none';
-    document.documentElement.style.setProperty('--cols', String(cols));
     $('colsBtn').textContent='Cols: '+cols;
-    if(bookMode){ showPage(page, false); } else { $('textDisplay').scrollLeft=0; }
+    segSelect('colsSeg', String(cols));
+    document.documentElement.style.setProperty('--cols', String(cols));
+    if(!bookMode){ layoutPages(); $('textDisplay').scrollLeft=0; return; }
+    // Re-measure AFTER the browser has applied the new column count — reading
+    // geometry in the same tick returns the previous layout, which is why a
+    // column change sometimes appeared not to take effect at all.
+    var go=function(){ layoutPages(); showPage(keepPage ? page : 0, false); };
+    layoutPages();
+    showPage(keepPage ? page : 0, false);
+    if(window.requestAnimationFrame) window.requestAnimationFrame(go);
+    else setTimeout(go, 0);
   }
   $('colsBtn').addEventListener('click', function(){
     cols = cols>=4 ? 1 : cols+1;
-    applyBookMode();
-    showPage(0, false);
+    page=0;
+    applyBookMode(false);
   });
-  // Re-paginate when the window changes shape; the column count is fixed but
-  // the number of pages it makes is not.
   window.addEventListener('resize', function(){
     if(!bookMode) return;
     clearTimeout(window.__pgT);
-    window.__pgT=setTimeout(function(){ showPage(page, false); }, 150);
+    window.__pgT=setTimeout(function(){ applyBookMode(true); }, 150);
   });
 
   /* ==========================================================================
@@ -1568,7 +1681,10 @@
       $('textDisplay').scrollTop=0;
     }
     markCurrent();
-    if(bookMode){ applyBookMode(); if(freshChapter){ freshChapter=false; showPage(0,false); } else { showPage(page,false); } }
+    if(bookMode){
+      if(freshChapter){ freshChapter=false; page=0; applyBookMode(false); }
+      else applyBookMode(true);
+    }
     applyGloss();
     $('pos').textContent=blocks.length?idx+1:0;
     $('total').textContent=blocks.length;
