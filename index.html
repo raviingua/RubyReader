@@ -126,6 +126,14 @@
   .chapterNav{display:flex;align-items:center;gap:6px;overflow-x:auto;-webkit-overflow-scrolling:touch;max-width:100%}
   .topbar-right{display:flex;align-items:center;gap:6px;flex:0 0 auto}
   .hideToggle{position:absolute;top:8px;right:10px;z-index:6}
+  /* Play/pause for the hidden-controls view, where the only other control was
+     the button that brings everything back. Deliberately the same outline pill
+     as that button rather than the filled accent one from the control strip:
+     the point of this view is an uninterrupted page, and a red circle floating
+     over it defeats that. Hidden until the controls are. */
+  .fsPlay{position:absolute;top:8px;right:54px;z-index:6;display:none}
+  .fsPlay.on{display:block}
+  .stage[data-light="1"] .fsPlay{background:rgba(255,255,255,.65);color:#333;border-color:#ccc}
   .stage[data-light="1"] .hideToggle{background:rgba(255,255,255,.65);color:#333;border-color:#ccc}
   .fontRow{justify-content:center;gap:6px;overflow-x:auto;-webkit-overflow-scrolling:touch}
   .fontRow .pill{flex:0 0 auto}
@@ -297,23 +305,71 @@
     border-left:3px solid transparent;transition:border-color .15s}
   .viewAll .rbBlock.isCurrent{border-left-color:var(--accent)}
   .stage[data-light="1"] .viewAll .rbBlock.isCurrent{border-left-color:var(--accent)}
+
+  /* ===== book mode =====
+     The chapter laid out in columns and paged through by hand, like a book,
+     instead of scrolled. CSS multi-column does the typesetting: the .inner is
+     given the stage's exact height and column-fill:auto, so text fills column
+     one to the bottom, then column two, and any columns past the last visible
+     one extend to the right where overflow:hidden clips them. Paging is then
+     just setting scrollLeft by whole stage-widths — no measuring of individual
+     blocks, and the browser handles widows, tables and images for us.
+
+     Pages are turned ONLY by hand. The reading cursor moves from block to
+     block as always and may well walk off the visible page; the page stays put
+     until you turn it. */
+  .textDisplay.bookMode{overflow:hidden;display:block;padding:44px 4% 40px;scroll-behavior:auto}
+  .textDisplay.bookMode .inner{
+    height:100%;margin:0;
+    column-count:var(--cols,1);
+    column-gap:3.2em;
+    column-fill:auto;
+    column-rule:1px solid rgba(128,128,128,.22);
+  }
+  .textDisplay.bookMode .rbBlock{break-inside:avoid-column}
+  .textDisplay.bookMode .rbTableWrap,
+  .textDisplay.bookMode .rbArt{break-inside:auto}
+
+  /* Page turners. Slim, low-contrast strips pinned to the edges — findable
+     when looked for, invisible when reading. They sit above the text but only
+     take clicks on themselves, so the tap zones underneath still work. */
+  .pageArrow{position:absolute;top:0;bottom:0;width:min(11%,64px);z-index:4;
+    display:none;align-items:center;justify-content:center;
+    background:none;color:var(--stext);opacity:.16;font-size:26px;line-height:1;
+    transition:opacity .15s}
+  .pageArrow:hover,.pageArrow:active{opacity:.6}
+  .pageArrow.prev{left:0}
+  .pageArrow.next{right:0}
+  .bookOn .pageArrow{display:flex}
+  .pageInd{position:absolute;left:50%;bottom:6px;transform:translateX(-50%);z-index:4;
+    display:none;gap:8px;align-items:center;
+    font-size:11px;color:var(--stext);opacity:.45;font-variant-numeric:tabular-nums;
+    pointer-events:none}
+  .bookOn .pageInd{display:flex}
+  .pageInd .findBtn{pointer-events:auto;border:1px solid currentColor;border-radius:7px;
+    padding:1px 6px;font-size:10px;color:inherit;opacity:.9}
+  .pageInd .findBtn.away{opacity:1;border-color:var(--accent);color:var(--accent)}
   .controls{display:flex;flex-direction:column;flex:0 0 auto;transition:opacity .2s,max-height .2s;overflow:hidden}
   .controls.hidden{max-height:0;opacity:0;pointer-events:none}
   .readout{flex:0 0 auto;display:flex;justify-content:space-between;padding:9px 18px;color:var(--dim);font-size:12px;font-variant-numeric:tabular-nums;border-top:1px solid var(--line);background:var(--panel)}
   .readout b{color:var(--text);font-weight:600}
-  .langToggleRow{flex:0 0 auto;display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:10px 14px 0;background:var(--panel)}
-  .langBtn{padding:11px;border-radius:10px;border:1px solid var(--line);background:var(--bg);font-weight:700;font-size:13px;color:var(--dim);letter-spacing:.4px}
-  .langBtn.sel{background:var(--accent);color:#fff;border-color:var(--accent)}
-  .langBtn:active{transform:translateY(1px)}
-  .wpmDualRow{flex:0 0 auto;display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:10px 14px 4px;background:var(--panel)}
-  .playRow{flex:0 0 auto;display:flex;justify-content:center;padding:6px 14px 4px;background:var(--panel)}
-  .play{width:64px;height:64px;border-radius:50%;background:var(--accent);color:#fff;font-size:24px;display:flex;align-items:center;justify-content:center}
-  .play:active{transform:scale(.96)}
-  .navrow{flex:0 0 auto;display:grid;grid-template-columns:repeat(4,1fr);gap:6px;padding:6px 14px 14px;background:var(--panel)}
-  .navrow button{padding:9px 4px;border-radius:9px;background:var(--bg);border:1px solid var(--line);color:var(--dim);
-    font-size:16px;display:flex;flex-direction:column;align-items:center;gap:2px}
-  .navrow button small{font-size:9.5px;letter-spacing:.3px}
-  .navrow button:active{transform:translateY(1px)}
+  /* ===== bottom controls =====
+     Two rows of equal cells instead of the five stacked rows this used to be
+     (language toggles, two speed steppers, a 64px play circle and a nav row),
+     which together ate a third of a phone screen. Play sits in the middle of
+     the top row, where a thumb reaches it, and is the only filled control —
+     everything else is an outline, so the eye goes straight to it. */
+  .ctlRow{flex:0 0 auto;display:grid;gap:6px;padding:7px 12px;background:var(--panel)}
+  .ctlTop{grid-template-columns:repeat(5,1fr);padding-bottom:3px}
+  .ctlBottom{grid-template-columns:repeat(4,1fr);padding-top:3px;padding-bottom:12px}
+  .ctlBtn{padding:8px 4px;min-height:44px;border-radius:10px;background:var(--bg);
+    border:1px solid var(--line);color:var(--dim);font-size:16px;line-height:1;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px}
+  .ctlBtn small{font-size:9.5px;letter-spacing:.3px}
+  .ctlBtn:active{transform:translateY(1px)}
+  .ctlBtn.play{background:var(--accent);border-color:var(--accent);color:#fff;font-size:19px}
+  .ctlBtn.langBtn{font-weight:700;font-size:13px;letter-spacing:.4px}
+  .ctlBtn.langBtn.sel{background:var(--accent);border-color:var(--accent);color:#fff}
 
   /* While a question is on screen the exercise panel is the only thing that
      should be reachable. Everything below it is hidden: the colour panel (it
@@ -345,6 +401,7 @@
     .chapterToast.flash{top:6px;font-size:10.5px;padding:5px 10px}
     .textDisplay{padding:52px 6% 16px}
     .hideToggle{top:4px;right:6px;padding:5px 8px;font-size:11px}
+    .fsPlay{top:4px;right:44px;padding:5px 8px;font-size:11px}
   }
 </style>
 </head>
@@ -372,6 +429,13 @@
     <div class="field" id="passField" style="display:none"><label>Password</label>
       <input type="password" id="bookPass" placeholder="Passphrase for your books" autocomplete="off">
       <label class="remember"><input type="checkbox" id="bookRemember"> Remember on this device</label>
+    </div>
+    <div class="field"><label>Reading mode</label>
+      <div class="seg" id="modeSeg"><button data-v="scroll" class="sel">Scroll</button><button data-v="book">Book</button></div>
+      <p class="hint" id="modeHint">Scroll: one block at a time, or the whole chapter, scrolling as usual.</p>
+    </div>
+    <div class="field" id="colsField" style="display:none"><label>Columns <span style="text-transform:none;color:var(--dim)">(book mode)</span></label>
+      <div class="seg" id="colsSeg"><button data-v="1" class="sel">1</button><button data-v="2">2</button><button data-v="3">3</button><button data-v="4">4</button></div>
     </div>
     <div class="row"><button class="btn" id="loadChapterBtn" disabled>Load chapter &amp; read</button></div>
     <p class="err" id="err"></p>
@@ -443,14 +507,22 @@
           <button class="pill" id="repeatBtn" title="Repeat each block 0, 1, or 2 extra times">Repeat: Off</button>
           <button class="pill" id="tintBtn" title="Colour the French fragments so the language switching is visible">Tint: Off</button>
           <button class="pill" id="glossBtn" title="Show or hide the ruby glosses. They are never read aloud either way.">Glosses: On</button>
+          <button class="pill" id="colsBtn" style="display:none" title="Number of columns in book mode">Cols: 1</button>
           <button class="pill" id="viewBtn" title="Show the whole chapter instead of one block at a time. Reading is unchanged.">View: Block</button>
           <button class="pill" id="exModeBtn" title="At each exercise question, stop and let you type an answer, then show the book&#39;s">Exercise: Off</button>
           <button class="pill" id="autoNextBtn" title="When a chapter ends, roll straight into the next one instead of stopping">Auto&#8209;chapter: On</button>
         </div>
       </div>
+      <button class="pill icon fsPlay" id="fsPlayBtn" title="Play / pause">&#9658;</button>
       <button class="pill icon hideToggle" id="hideBtn" title="Hide all controls">⤢</button>
       <div class="chapterToast" id="chapterToast"></div>
       <div class="textDisplay" id="textDisplay"><div class="inner" id="textInner"></div></div>
+      <button class="pageArrow prev" id="pagePrev" title="Previous page">&#8249;</button>
+      <button class="pageArrow next" id="pageNext" title="Next page">&#8250;</button>
+      <div class="pageInd" id="pageInd">
+        <span id="pageNum">1 / 1</span>
+        <button class="findBtn" id="pageFind" title="Go to the page being read">reading &#8250;</button>
+      </div>
       <div class="exPanel" id="exPanel">
         <div class="exTag" id="exTag">Exercise</div>
         <div class="exQ" id="exQ"></div>
@@ -490,23 +562,20 @@
       <div class="readout">
         <span><b id="pos">0</b> / <span id="total">0</span></span>
         <span id="rbNote"></span>
-        <span><b id="wpmFRr">150</b> fr</span>
-        <span><b id="wpmENr">250</b> en</span>
+        <span><b id="wpmFRr">150</b>/<b id="wpmENr">250</b> wpm</span>
       </div>
-      <div class="langToggleRow" id="langToggleRow">
-        <button class="langBtn sel" id="langBtnFR" data-lang="fr">Read French</button>
-        <button class="langBtn sel" id="langBtnEN" data-lang="en">Read English</button>
+      <div class="ctlRow ctlTop">
+        <button class="ctlBtn" data-act="prevBlock" title="Previous block">&#9198;<small>prev</small></button>
+        <button class="ctlBtn" data-act="replay" title="Read this block again">&#8634;<small>replay</small></button>
+        <button class="ctlBtn play" data-act="toggle" id="playBtn" title="Play / pause">&#9658;</button>
+        <button class="ctlBtn" data-act="nextBlock" title="Next block">&#9197;<small>next</small></button>
+        <button class="ctlBtn" data-act="reset" title="Back to the first block">&#8635;<small>reset</small></button>
       </div>
-      <div class="wpmDualRow">
+      <div class="ctlRow ctlBottom">
+        <button class="ctlBtn langBtn sel" id="langBtnFR" data-lang="fr">FR<small>read</small></button>
+        <button class="ctlBtn langBtn sel" id="langBtnEN" data-lang="en">EN<small>read</small></button>
         <div class="wpmRow"><button data-wpm="fr" data-d="-10">&minus;</button><span class="val" id="wpmValFR">150</span><span class="lbl">FR</span><button data-wpm="fr" data-d="10">+</button></div>
         <div class="wpmRow"><button data-wpm="en" data-d="-10">&minus;</button><span class="val" id="wpmValEN">250</span><span class="lbl">EN</span><button data-wpm="en" data-d="10">+</button></div>
-      </div>
-      <div class="playRow"><button class="play" data-act="toggle" id="playBtn">&#9658;</button></div>
-      <div class="navrow">
-        <button data-act="prevBlock">&#9198;<small>prev</small></button>
-        <button data-act="replay">&#8634;<small>replay</small></button>
-        <button data-act="nextBlock">&#9197;<small>next</small></button>
-        <button data-act="reset">&#8635;<small>reset</small></button>
       </div>
     </div>
   </section>
@@ -647,6 +716,15 @@
   }
 
   function openChapterContent(b,ci,content,autoPlay){
+    // The setup screen's choice takes effect here, the first time a chapter is
+    // opened. Book mode implies whole-chapter view — a paged single block
+    // would be a page with one paragraph on it.
+    if(setupMode==='book' && !bookMode){
+      bookMode=true; cols=setupCols; viewAll=true;
+      applyViewBtn(); renderedMode=null;
+    } else if(setupMode==='scroll' && bookMode){
+      bookMode=false; applyBookMode(); renderedMode=null;
+    }
     var c=content.chapters[ci];
     if(!c){ $('err').textContent='Chapter not found.'; return; }
     currentBook=b; currentChapterIdx=ci; updateChapterNavUI();
@@ -827,6 +905,18 @@
   function seg(id,cb){ $(id).addEventListener('click',function(e){ var b=e.target.closest('button'); if(!b)return;
     var ch=$(id).children; for(var i=0;i<ch.length;i++)ch[i].classList.remove('sel'); b.classList.add('sel'); cb(b.dataset.v); }); }
   seg('themeSeg',function(v){ appTheme=v; applyAppTheme(); });
+
+  // ---- reading mode / columns, chosen before the chapter opens ----
+  var setupMode='scroll', setupCols=1;
+  seg('modeSeg', function(v){
+    setupMode=v;
+    $('colsField').style.display = (v==='book') ? '' : 'none';
+    $('modeHint').textContent = (v==='book')
+      ? 'Book: the chapter set in columns, one screenful at a time. Turn pages with the arrow keys, the edge arrows, or a double-tap at the left or right of the page. Pages never turn on their own.'
+      : 'Scroll: one block at a time, or the whole chapter, scrolling as usual.';
+  });
+  seg('colsSeg', function(v){ setupCols=parseInt(v,10)||1; });
+
   if(window.matchMedia){ try{ window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change',function(){ if(appTheme==='auto')applyAppTheme(); }); }catch(e){} }
   applyAppTheme();
 
@@ -927,10 +1017,12 @@
     $('topbar').style.opacity = controlsHidden?'0':'1';
     $('topbar').style.pointerEvents = controlsHidden?'none':'auto';
     $('controls').classList.toggle('hidden',controlsHidden);
+    $('fsPlayBtn').classList.toggle('on', controlsHidden);
     $('hideBtn').textContent = controlsHidden ? '⤡' : '⤢';
     $('hideBtn').title = controlsHidden ? 'Show all controls' : 'Hide all controls';
   }
   $('hideBtn').onclick=function(){ controlsHidden=!controlsHidden; applyHidden(); };
+  $('fsPlayBtn').addEventListener('click', function(){ blurActive(); toggle(); });
 
   /* ========== per-language read toggles ==========
      Both on by default: the text is read as written, switching voices. Turning
@@ -1282,6 +1374,93 @@
     else submitExercise();
   });
 
+
+  /* ==========================================================================
+     BOOK MODE
+     ==========================================================================
+     Chosen on the setup screen, before the chapter opens, because it changes
+     how the chapter is laid out rather than what is read. Selecting it also
+     turns on whole-chapter view: a paged single block would be a page with one
+     paragraph on it.
+
+     Nothing about reading changes. Playback still walks block by block, the
+     cursor still marks the block being spoken, exercise mode still stops for
+     input. The only difference is that the text is columnised and clipped to
+     one screenful, and that YOU decide when the page turns — the reader never
+     turns it, even when the voice has walked onto the next one. That is the
+     whole point of the mode: to be able to follow along, or look at the
+     opposite page, without the layout moving under you. */
+  var bookMode=false, cols=1, page=0, pageCount=1;
+
+  function pageWidth(){
+    var el=$('textDisplay');
+    return el.clientWidth || 1;
+  }
+  function measurePages(){
+    var el=$('textDisplay');
+    if(!bookMode){ pageCount=1; return; }
+    var w=pageWidth();
+    // scrollWidth reports the full columnised extent even though the box is
+    // overflow:hidden, which is what makes this measurable at all.
+    pageCount=Math.max(1, Math.ceil((el.scrollWidth - 2) / w));
+  }
+  function showPage(n, smooth){
+    var el=$('textDisplay');
+    measurePages();
+    page=Math.max(0, Math.min(n, pageCount-1));
+    try{ el.scrollTo({ left: page*pageWidth(), behavior: smooth ? 'smooth' : 'auto' }); }
+    catch(e){ el.scrollLeft = page*pageWidth(); }
+    updatePageInd();
+  }
+  function nextPage(){ if(bookMode) showPage(page+1, true); }
+  function prevPage(){ if(bookMode) showPage(page-1, true); }
+  // Which page the block being read is on — used only to label the "reading"
+  // button, never to move the page by itself.
+  function readingPage(){
+    var el=$('blockEl');
+    if(!el || !bookMode) return -1;
+    var host=$('textDisplay');
+    var left=el.getBoundingClientRect().left - host.getBoundingClientRect().left + host.scrollLeft;
+    return Math.max(0, Math.floor(left / pageWidth()));
+  }
+  function updatePageInd(){
+    if(!bookMode) return;
+    $('pageNum').textContent=(page+1)+' / '+pageCount;
+    var rp=readingPage();
+    var away = rp >= 0 && rp !== page;
+    var btn=$('pageFind');
+    btn.classList.toggle('away', away);
+    btn.textContent = away ? ('reading p'+(rp+1)) : 'reading here';
+  }
+  $('pagePrev').addEventListener('click', function(e){ e.stopPropagation(); prevPage(); });
+  $('pageNext').addEventListener('click', function(e){ e.stopPropagation(); nextPage(); });
+  $('pageFind').addEventListener('click', function(e){
+    e.stopPropagation();
+    var rp=readingPage();
+    if(rp>=0) showPage(rp, true);
+  });
+
+  function applyBookMode(){
+    $('textDisplay').classList.toggle('bookMode', bookMode);
+    $('stage').classList.toggle('bookOn', bookMode);
+    $('colsBtn').style.display = bookMode ? '' : 'none';
+    document.documentElement.style.setProperty('--cols', String(cols));
+    $('colsBtn').textContent='Cols: '+cols;
+    if(bookMode){ showPage(page, false); } else { $('textDisplay').scrollLeft=0; }
+  }
+  $('colsBtn').addEventListener('click', function(){
+    cols = cols>=4 ? 1 : cols+1;
+    applyBookMode();
+    showPage(0, false);
+  });
+  // Re-paginate when the window changes shape; the column count is fixed but
+  // the number of pages it makes is not.
+  window.addEventListener('resize', function(){
+    if(!bookMode) return;
+    clearTimeout(window.__pgT);
+    window.__pgT=setTimeout(function(){ showPage(page, false); }, 150);
+  });
+
   /* ==========================================================================
      BLOCK PLAYER
      ==========================================================================
@@ -1335,7 +1514,7 @@
      Whichever mode is on, the current block carries id="blockEl". That is what
      keeps the rest of the player unchanged: highlightUnit, clearHighlight, applyGloss and the exercise lookups all reach the right block through it
      without knowing which view they are in. */
-  var viewAll=false, renderedBlocks=null, renderedMode=null;
+  var viewAll=false, renderedBlocks=null, renderedMode=null, freshChapter=true;
 
   function blockClass(b){
     return 'rbBlock'
@@ -1363,6 +1542,7 @@
   // instructions while answering. The page still starts at the top when a
   // chapter is first opened.
   function markCurrent(){
+    if(bookMode) setTimeout(updatePageInd, 0);
     var prev=$('blockEl');
     if(prev){ prev.removeAttribute('id'); prev.classList.remove('isCurrent'); }
     var el=$('textInner').querySelector('[data-blk="'+idx+'"]');
@@ -1377,7 +1557,7 @@
       inner.innerHTML=''; renderedBlocks=null; renderedMode=null;
       $('pos').textContent=0; $('total').textContent=0;
       $('rbNote').textContent='';
-      $('playBtn').textContent='\u25b6';
+      updatePlayBtnIcon();
       return;
     }
     var mode = viewAll ? 'all' : 'one';
@@ -1392,6 +1572,7 @@
       }
       renderedBlocks=blocks; renderedMode=mode;
       $('textDisplay').scrollTop=0;
+      freshChapter=true;
     } else if(!viewAll){
       // Block mode: one element, replaced each time.
       inner.innerHTML='';
@@ -1399,11 +1580,12 @@
       $('textDisplay').scrollTop=0;
     }
     markCurrent();
+    if(bookMode){ applyBookMode(); if(freshChapter){ freshChapter=false; showPage(0,false); } else { showPage(page,false); } }
     applyGloss();
     $('pos').textContent=blocks.length?idx+1:0;
     $('total').textContent=blocks.length;
     updateRbNote();
-    $('playBtn').textContent=(playing && !paused)?'\u275a\u275a':'\u25b6';
+    updatePlayBtnIcon();
   }
   function applyViewBtn(){
     $('viewBtn').textContent='View: '+(viewAll?'Chapter':'Block');
@@ -1435,7 +1617,11 @@
     if(exTotal) tail += exMode ? '  \u00b7 ' + exTotal + ' questions' : '  \u00b7 ' + exTotal + ' questions available';
     note.textContent = parts.join(' + ') + tail;
   }
-  function updatePlayBtnIcon(){ $('playBtn').textContent=(playing && !paused)?'\u275a\u275a':'\u25b6'; }
+  function updatePlayBtnIcon(){
+    var icon=(playing && !paused)?'\u275a\u275a':'\u25b6';
+    $('playBtn').textContent=icon;
+    $('fsPlayBtn').textContent=icon;
+  }
 
   // The block's segments, filtered to what should actually be spoken. Built
   // fresh at the start of each reading so toggling a language mid-book takes
@@ -1723,7 +1909,12 @@
     var t=e.target, tag=t&&t.tagName;
     if(tag==='INPUT'||tag==='TEXTAREA'||(t&&t.isContentEditable)) return;
     if(e.code==='Space'){e.preventDefault();toggle();}
-    else if(e.code==='ArrowLeft')prevBlock(); else if(e.code==='ArrowRight')nextBlock();
+    // In book mode the arrows are page turners, which is what a reader
+    // reaches for; block navigation stays on the prev/next buttons.
+    else if(e.code==='ArrowLeft'){ if(bookMode){ e.preventDefault(); prevPage(); } else prevBlock(); }
+    else if(e.code==='ArrowRight'){ if(bookMode){ e.preventDefault(); nextPage(); } else nextBlock(); }
+    else if(e.code==='PageUp'){ if(bookMode){ e.preventDefault(); prevPage(); } }
+    else if(e.code==='PageDown'){ if(bookMode){ e.preventDefault(); nextPage(); } }
     // Wired-headphone / keyboard media keys (desktop OSes surface a headset's
     // inline remote as these standard media-key codes when the tab is focused).
     else if(e.code==='MediaPlayPause'){ e.preventDefault(); blurActive(); toggle(); }
@@ -1756,6 +1947,14 @@
   }
   makeDoubleTap($('textDisplay'), function(e){
     var zone=zoneAtX($('textDisplay'), e.clientX);
+    // Book mode: the same gesture turns the page instead of moving the
+    // cursor, which is the phone equivalent of the arrow keys.
+    if(bookMode){
+      if(zone==='right') nextPage();
+      else if(zone==='left') prevPage();
+      else replayBlock();
+      return;
+    }
     if(zone==='right') nextBlock();
     else if(zone==='left') prevBlock();
     else replayBlock();
