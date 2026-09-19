@@ -132,13 +132,16 @@
      the point of this view is an uninterrupted page, and a red circle floating
      over it defeats that. Hidden until the controls are. */
   .fsPlay{position:absolute;top:8px;right:54px;z-index:6;display:none}
-  /* Bottom-centre placement. Still the same outline pill — only a little
-     larger, because at the bottom of the page it is further from the thumb's
-     resting position and there is nothing beside it to judge its size against.
-     It floats over the text rather than reserving space, so a line may pass
-     underneath it; it sits clear of the book-mode page indicator. */
-  .fsPlay.pos-bottom{top:auto;right:auto;bottom:26px;left:50%;transform:translateX(-50%);
-    padding:9px 20px;font-size:17px;border-radius:12px}
+  /* Bottom-centre placement. Still the same outline pill, a little larger than
+     the corner one — down here there is nothing beside it to judge its size
+     against. It is lifted well clear of the bottom edge (about two and a half
+     times its original inset) so that reaching it does not mean stretching the
+     thumb to the very corner of the screen, which is where a one-handed grip
+     is least comfortable. It floats over the text rather than reserving space,
+     so a line may pass underneath it, and it clears the book-mode page
+     indicator with room to spare. */
+  .fsPlay.pos-bottom{top:auto;right:auto;bottom:65px;left:50%;transform:translateX(-50%);
+    padding:11px 24px;font-size:19px;border-radius:13px}
   .fsPlay.on{display:block}
   .stage[data-light="1"] .fsPlay{background:rgba(255,255,255,.65);color:#333;border-color:#ccc}
   .stage[data-light="1"] .hideToggle{background:rgba(255,255,255,.65);color:#333;border-color:#ccc}
@@ -402,7 +405,7 @@
     .textDisplay{padding:52px 6% 16px}
     .hideToggle{top:4px;right:6px;padding:5px 8px;font-size:11px}
     .fsPlay{top:4px;right:44px;padding:5px 8px;font-size:11px}
-    .fsPlay.pos-bottom{top:auto;right:auto;bottom:22px;padding:8px 17px;font-size:15px}
+    .fsPlay.pos-bottom{top:auto;right:auto;bottom:55px;padding:10px 21px;font-size:17px}
   }
 </style>
 </head>
