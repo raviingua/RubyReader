@@ -1141,6 +1141,11 @@
     try{ navigator.mediaSession.setActionHandler('previoustrack', function(){ blurActive(); prevBlock(); }); }catch(e){}
     try{ navigator.mediaSession.setActionHandler('nexttrack', function(){ blurActive(); nextBlock(); }); }catch(e){}
   }
+  // iOS/Safari 16.4+: without this, the tab's audio is "ambient" — silenced
+  // by the hardware mute switch and not registered as a real Now Playing
+  // session, which is what a wired headset's inline remote routes to.
+  // "playback" tells Safari this is real foreground media playback.
+  if('audioSession' in navigator){ try{ navigator.audioSession.type='playback'; }catch(e){} }
   // A hardware control firing shouldn't leave an on-screen button looking
   // pressed, so whatever still holds focus gets blurred before we react.
   function blurActive(){
@@ -1199,8 +1204,20 @@
 
   function onPlaybackStateChanged(){
     updateMediaSessionPlaybackState();
-    if(playing && !paused){ requestWakeLock(); startSilentAudio(); }
-    else { stopSilentAudio(); if(!playing) releaseWakeLock(); }
+    // The silent <audio> element is what makes iOS/Safari route a wired
+    // headset's inline remote to this page at all, but Safari has a known
+    // bug where pausing that element and later calling .play() again on it
+    // doesn't reliably reconnect it to the remote-control/Now-Playing
+    // system. So it keeps looping for the whole "playing" session (through
+    // a mid-block pause), and only actually stops when the session itself
+    // ends. The screen wake lock still follows pause/resume normally.
+    if(playing){
+      startSilentAudio();
+      if(!paused) requestWakeLock(); else releaseWakeLock();
+    } else {
+      stopSilentAudio();
+      releaseWakeLock();
+    }
   }
 
 
