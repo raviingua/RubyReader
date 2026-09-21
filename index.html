@@ -145,14 +145,20 @@
   .fsPlay.on{display:block}
   .stage[data-light="1"] .fsPlay{background:rgba(255,255,255,.65);color:#333;border-color:#ccc}
   .stage[data-light="1"] .hideToggle{background:rgba(255,255,255,.65);color:#333;border-color:#ccc}
-  .fontRow{justify-content:center;gap:6px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+  /* The pill row WRAPS onto as many rows as it needs instead of scrolling
+     sideways. A single sideways-scrolling row of a dozen pills was hard to
+     reach the end of on a narrow screen, and on some it could not be scrolled
+     at all. Wrapping costs height, but the controls are hidden in the
+     full-screen view where most reading happens, and the text area below is
+     padded to clear however many rows there turn out to be (see --topPad). */
+  .fontRow{justify-content:center;gap:6px;flex-wrap:wrap;overflow:visible}
   .fontRow .pill{flex:0 0 auto}
 
   /* Chapter overlay. Sits above everything (including the colour panel and
      the hide-controls button) and is pointer-events:none, so it can never
      reflow, cover-and-swallow, or otherwise touch the text underneath —
      it only paints over it briefly. */
-  .chapterToast{position:absolute;top:64px;left:50%;transform:translateX(-50%);max-width:88%;
+  .chapterToast{position:absolute;top:var(--topPad,64px);left:50%;transform:translateX(-50%);max-width:88%;
     background:rgba(0,0,0,.75);color:#fff;font-size:12.5px;line-height:1.4;text-align:center;
     padding:9px 14px;border-radius:10px;z-index:12;opacity:0;pointer-events:none;transition:opacity .25s}
   .chapterToast.show{opacity:1}
@@ -165,7 +171,7 @@
   .stage[data-light="1"] .chapterToast.flash{background:rgba(255,255,255,.82)}
 
   .textDisplay{position:absolute;inset:0;overflow-y:auto;-webkit-overflow-scrolling:touch;
-    padding:70px 6% 26px;z-index:2;display:flex;align-items:center;touch-action:pan-y;
+    padding:var(--topPad,70px) 6% 26px;z-index:2;display:flex;align-items:center;touch-action:pan-y;
     -webkit-user-select:none;user-select:none}
   .textDisplay .inner{width:100%;margin:auto}
 
@@ -328,7 +334,7 @@
      Pages are turned ONLY by hand. The reading cursor moves from block to
      block as always and may well walk off the visible page; the page stays put
      until you turn it. */
-  .textDisplay.bookMode{overflow:hidden;display:block;padding:44px 4% 40px;scroll-behavior:auto}
+  .textDisplay.bookMode{overflow:hidden;display:block;padding:var(--topPad,44px) 4% 40px;scroll-behavior:auto}
   /* column-count, column-gap and width are set from script: they have to be
      exact pixel values for the page arithmetic to line up, which a stylesheet
      cannot express. Only what is constant lives here. */
@@ -399,10 +405,10 @@
     .topbar{padding:0 50px 0 8px}
     .topbar-row{gap:4px}
     .pill{padding:5px 9px;font-size:11px}
-    .fontRow{gap:4px}
-    .chapterToast{top:40px;font-size:11px;padding:7px 11px}
+    .fontRow{gap:5px}
+    .chapterToast{font-size:11px;padding:7px 11px}
     .chapterToast.flash{top:6px;font-size:10.5px;padding:5px 10px}
-    .textDisplay{padding:52px 6% 16px}
+    .textDisplay{padding:var(--topPad,52px) 6% 16px}
     .hideToggle{top:4px;right:6px;padding:5px 8px;font-size:11px}
     .fsPlay{top:4px;right:44px;padding:5px 8px;font-size:11px}
     .fsPlay.pos-bottom{top:auto;right:auto;bottom:55px;padding:10px 21px;font-size:17px}
@@ -440,6 +446,9 @@
     <div class="field"><label>Reading mode</label>
       <div class="seg" id="modeSeg"><button data-v="scroll" class="sel">Scroll</button><button data-v="book">Book</button></div>
       <p class="hint" id="modeHint">Scroll: one block at a time, or the whole chapter, scrolling as usual.</p>
+    </div>
+    <div class="field" id="viewField"><label>View <span style="text-transform:none;color:var(--dim)">(scroll mode)</span></label>
+      <div class="seg" id="viewSeg"><button data-v="block" class="sel">Block</button><button data-v="chapter">Chapter</button></div>
     </div>
     <div class="field" id="colsField" style="display:none"><label>Columns <span style="text-transform:none;color:var(--dim)">(book mode)</span></label>
       <div class="seg" id="colsSeg"><button data-v="1" class="sel">1</button><button data-v="2">2</button><button data-v="3">3</button><button data-v="4">4</button></div>
@@ -724,12 +733,14 @@
     // The setup screen's choice takes effect here, the first time a chapter is
     // opened. Book mode implies whole-chapter view — a paged single block
     // would be a page with one paragraph on it.
-    if(setupMode==='book' && !bookMode){
-      bookMode=true; viewAll=true; page=0;
-      applyViewBtn(); renderedMode=null;
-    } else if(setupMode==='scroll' && bookMode){
-      bookMode=false; applyBookMode(false); renderedMode=null;
+    if(setupMode==='book'){
+      if(!bookMode){ bookMode=true; page=0; }
+      viewAll=true;
+    } else {
+      if(bookMode){ bookMode=false; applyBookMode(false); }
+      viewAll=(setupView==='chapter');
     }
+    applyViewBtn(); renderedMode=null;
     var c=content.chapters[ci];
     if(!c){ $('err').textContent='Chapter not found.'; return; }
     currentBook=b; currentChapterIdx=ci; updateChapterNavUI();
@@ -936,7 +947,10 @@
   var setupMode='scroll', setupCols=1;
   seg('modeSeg', function(v){
     setupMode=v;
+    // Each mode shows its own layout choice: Block/Chapter for scroll, the
+    // column count for book (which is always whole-chapter).
     $('colsField').style.display = (v==='book') ? '' : 'none';
+    $('viewField').style.display = (v==='book') ? 'none' : '';
     $('modeHint').textContent = (v==='book')
       ? 'Book: the chapter set in columns, one screenful at a time. Turn pages with the arrow keys, or a double-tap at the left or right of the page. Pages never turn on their own.'
       : 'Scroll: one block at a time, or the whole chapter, scrolling as usual.';
@@ -945,6 +959,19 @@
   // code, changing this after a book was already open did nothing at all,
   // because the mode had already been switched on and the column count was
   // only read at that moment.
+  // Block / Chapter for scroll mode. Like the column count it applies at once
+  // if a book is already open, and it stays in step with the View pill in
+  // the reader — whichever was used last is what the next chapter opens in,
+  // so a choice made in one place is never silently undone by the other.
+  var setupView='block';
+  seg('viewSeg', function(v){
+    setupView=v;
+    if(!bookMode){
+      viewAll=(v==='chapter');
+      applyViewBtn(); renderedMode=null;
+      if(blocks && blocks.length) renderBlock();
+    }
+  });
   seg('colsSeg', function(v){
     setupCols=parseInt(v,10)||1;
     cols=setupCols;
@@ -1048,6 +1075,26 @@
      clickable while everything else is hidden — otherwise there'd be no way
      to bring the controls back. */
   var controlsHidden=false;
+  /* How far the text must start below the top of the stage. With the controls
+     showing it is the height of the top bar, which now varies with how many
+     rows the pills wrap onto — so it is measured, not guessed. With them
+     hidden (full screen) only the two small corner buttons are left, and the
+     text gets the page back. Book mode re-paginates, since its page height
+     just changed. */
+  var FULLSCREEN_PAD=44;
+  function syncTopPad(){
+    var tb=$('topbar');
+    var h = controlsHidden ? FULLSCREEN_PAD : Math.max(FULLSCREEN_PAD, (tb.offsetHeight||0) + 14);
+    var prev=document.documentElement.style.getPropertyValue('--topPad');
+    document.documentElement.style.setProperty('--topPad', h+'px');
+    if(prev !== h+'px' && typeof bookMode!=='undefined' && bookMode && typeof applyBookMode==='function'){
+      applyBookMode(true);
+    }
+  }
+  window.addEventListener('resize', function(){
+    clearTimeout(window.__tpT);
+    window.__tpT=setTimeout(syncTopPad, 120);
+  });
   function applyHidden(){
     $('topbar').style.opacity = controlsHidden?'0':'1';
     $('topbar').style.pointerEvents = controlsHidden?'none':'auto';
@@ -1055,6 +1102,7 @@
     $('fsPlayBtn').classList.toggle('on', controlsHidden);
     $('hideBtn').textContent = controlsHidden ? '⤡' : '⤢';
     $('hideBtn').title = controlsHidden ? 'Show all controls' : 'Hide all controls';
+    syncTopPad();
   }
   $('hideBtn').onclick=function(){ controlsHidden=!controlsHidden; applyHidden(); };
   $('fsPlayBtn').addEventListener('click', function(){ blurActive(); toggle(); });
@@ -1141,11 +1189,6 @@
     try{ navigator.mediaSession.setActionHandler('previoustrack', function(){ blurActive(); prevBlock(); }); }catch(e){}
     try{ navigator.mediaSession.setActionHandler('nexttrack', function(){ blurActive(); nextBlock(); }); }catch(e){}
   }
-  // iOS/Safari 16.4+: without this, the tab's audio is "ambient" — silenced
-  // by the hardware mute switch and not registered as a real Now Playing
-  // session, which is what a wired headset's inline remote routes to.
-  // "playback" tells Safari this is real foreground media playback.
-  if('audioSession' in navigator){ try{ navigator.audioSession.type='playback'; }catch(e){} }
   // A hardware control firing shouldn't leave an on-screen button looking
   // pressed, so whatever still holds focus gets blurred before we react.
   function blurActive(){
@@ -1189,16 +1232,10 @@
   });
 
   var silentAudioEl=null;
-  // NOTE: this must be a real ~1s clip of silent PCM samples, not a
-  // zero-length "data" chunk. A WAV with 0 samples of audio is not
-  // continuous, ongoing media as far as the OS is concerned, so it never
-  // gets attached to a Now Playing session — which is what a wired
-  // headset's inline remote actually controls. (iOS in particular will
-  // just ignore the headphone button if this file has no real duration.)
   function ensureSilentAudio(){
     if(silentAudioEl) return silentAudioEl;
     var a=document.createElement('audio');
-    a.src='data:audio/wav;base64,UklGRmQfAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YUAfAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgA==';
+    a.src='data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=';
     a.loop=true; a.volume=0.01; a.setAttribute('playsinline','');
     a.style.display='none';
     document.body.appendChild(a);
@@ -1210,20 +1247,8 @@
 
   function onPlaybackStateChanged(){
     updateMediaSessionPlaybackState();
-    // The silent <audio> element is what makes iOS/Safari route a wired
-    // headset's inline remote to this page at all, but Safari has a known
-    // bug where pausing that element and later calling .play() again on it
-    // doesn't reliably reconnect it to the remote-control/Now-Playing
-    // system. So it keeps looping for the whole "playing" session (through
-    // a mid-block pause), and only actually stops when the session itself
-    // ends. The screen wake lock still follows pause/resume normally.
-    if(playing){
-      startSilentAudio();
-      if(!paused) requestWakeLock(); else releaseWakeLock();
-    } else {
-      stopSilentAudio();
-      releaseWakeLock();
-    }
+    if(playing && !paused){ requestWakeLock(); startSilentAudio(); }
+    else { stopSilentAudio(); if(!playing) releaseWakeLock(); }
   }
 
 
@@ -1564,6 +1589,7 @@
     $('textDisplay').classList.toggle('bookMode', bookMode);
     $('stage').classList.toggle('bookOn', bookMode);
     $('colsBtn').style.display = bookMode ? '' : 'none';
+    if(typeof syncTopPad==='function') setTimeout(syncTopPad, 0);
     $('colsBtn').textContent='Cols: '+cols;
     segSelect('colsSeg', String(cols));
     document.documentElement.style.setProperty('--cols', String(cols));
@@ -1620,6 +1646,7 @@
   // a person picks a chapter by hand but would kill the audio at exactly the
   // moment continuous listening is supposed to carry on.
   function setBlocks(list, chapter){
+    setTimeout(syncTopPad, 0);
     blocks=list||[]; idx=0;
     buildExerciseIndex(chapter);
     $('setup').style.display='none';
@@ -1723,6 +1750,7 @@
   }
   $('viewBtn').addEventListener('click', function(){
     viewAll=!viewAll;
+    if(!bookMode){ setupView = viewAll ? 'chapter' : 'block'; segSelect('viewSeg', setupView); }
     applyViewBtn();
     renderedMode=null;           // force a rebuild in the new mode
     renderBlock();
