@@ -1099,15 +1099,39 @@ function commitPair(book, stats, q, a, rule){
  * Anything short of that leaves the part alone, exactly as before, so a book
  * that merely happens to print "Question 3" somewhere cannot be mis-paired.
  *
- * What counts as the answer: the "Answer N" line, and — only when that line is
- * a lead-in ("Model answer (14 words):") — the paragraphs after it up to the
- * first "Why" / "Bonus" / "Also correct" / "Check your answer" paragraph. The
- * explanations stay in the Réponses chapter; they are not read as the answer.
+ * What counts as the answer: EVERYTHING from the "Answer N" paragraph up to the
+ * next "Answer N" (or the end of the chapter) — the answer line, the "Why:"
+ * explanation, the quoted French, the "Bonus:" notes, "Check your answer"
+ * lists. That is the whole entry in the book, and the reader shows and reads
+ * all of it. It ships as block-structured HTML (one <div class="exBlk"> per
+ * source paragraph, bold/italic/lists intact) so the panel looks like the
+ * page; the question is shipped the same way as qHtml. The "Question N" /
+ * "Answer N" labels themselves are dropped — the panel already numbers them.
  */
 const QA_QUESTION = /^Question\s*(\d+)\b\s*([\s\S]*)$/;
 const QA_ANSWER   = /^Answer\s*(\d+)\b\s*([\s\S]*)$/;
-const QA_STOP     = /^(?:Why\b|Bonus\b|Also correct\b|Check your answer\b)/i;
-const QA_LEADIN   = /(?::\s*$)|^Model answers?\b/i;
+// The label at the very start of a block's HTML (inside its first ttsSeg span).
+const QA_LABEL_HTML = /^(<span class="ttsSeg"[^>]*>)\s*(?:Question|Answer)(?:\s|&nbsp;|&#160;)*\d+(?:\s|&nbsp;|&#160;)*/;
+
+// One source paragraph -> one panel line. data-seg is dropped (the panel has no
+// use for it); the ttsSeg/data-lang spans stay so the French tint applies here
+// exactly as it does on the page.
+function qaBlockHtml(bl, dropLabel, firstLang){
+  let h = String(bl.html || '').replace(/ data-seg="\d+"/g, '');
+  if(dropLabel){
+    h = h.replace(QA_LABEL_HTML, '$1');
+    h = h.replace(/^<span class="ttsSeg"[^>]*><\/span>/, '');      // label was a segment of its own
+    h = h.replace(/^(<span[^>]*>)\s+/, '$1');
+    // The label ("Answer 4") is English, so a segment it was merged into was
+    // tagged English even when what is left is French. Re-tag that first span
+    // from the label-free text so the on-screen tint matches what is spoken.
+    if(firstLang) h = h.replace(/^(<span class="ttsSeg" data-lang=")(?:fr|en)(")/, '$1' + firstLang + '$2');
+  }
+  return h.trim() ? '<div class="exBlk">' + h + '</div>' : '';
+}
+function qaPlain(bl){
+  return (bl._lines || []).map(l => String(l.raw || '').replace(/\s+/g, ' ').trim()).filter(Boolean).join(' ');
+}
 
 function attachNumberedQA(book, stats){
   const rawOf = bl => (bl && bl.type === 'p' && bl._lines && bl._lines[0])
@@ -1157,23 +1181,40 @@ function attachNumberedQA(book, stats){
 
       const a = aBy.get(q.num);
       const aBlocks = book.chapters[a.ci].blocks;
-      const aParts = a.body ? [a.body] : [];
-      if(QA_LEADIN.test(a.body)){
-        for(const bi of a.blocks.slice(1)){
-          const bl = aBlocks[bi];
-          const t = rawOf(bl);
-          if(bl.type !== 'p' || !t || QA_STOP.test(t)) break;
-          aParts.push(t);
-        }
-      }
 
-      const qText = [q.body].concat(q.blocks.slice(1).map(bi => rawOf(qBlocks[bi])))
+      // ---- question: plain text for the report/fallback, HTML for the panel
+      const qText = [q.body].concat(q.blocks.slice(1).map(bi => qaPlain(qBlocks[bi])))
         .filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
       const entry = { n: q.num, block: tb, from: 0, to: qBlocks[tb].segs.length - 1, q: qText };
-      const aText = aParts.join(' ').replace(/\s+/g, ' ').trim();
-      if(aText){
-        const pay = answerPayload(aText);
-        if(pay.text){ entry.a = pay.text; entry.aHtml = pay.html; entry.aSegs = pay.segs; stats.answered++; }
+      const qFirst = q.body ? answerPayload(q.body).segs[0] : null;
+      const qHtml = q.blocks.map((bi, k) => qaBlockHtml(qBlocks[bi], k === 0, qFirst && qFirst.lang)).join('');
+      if(qHtml) entry.qHtml = qHtml;
+
+      // ---- answer: the whole extent, up to the next "Answer N"
+      // Speech: the "Answer N ..." line is re-segmented WITHOUT its label (the
+      // label is tagged English and would be read as "Answer four" in the
+      // English voice); every later paragraph already carries the page's own
+      // language-tagged segments, so those are reused as they are.
+      const first = a.body ? answerPayload(a.body) : null;
+      const aSegs = first ? first.segs.slice() : [];
+      const aPlain = a.body ? [first.text || a.body] : [];
+      let aHtml = '';
+      a.blocks.forEach((bi, k) => {
+        const bl = aBlocks[bi];
+        aHtml += qaBlockHtml(bl, k === 0, first && first.segs[0] && first.segs[0].lang);
+        if(k > 0){
+          (bl.segs || []).forEach(sg => { if(sg.text && sg.text.trim()) aSegs.push({ lang: sg.lang, text: sg.text }); });
+          const t = qaPlain(bl);
+          if(t) aPlain.push(t);
+        }
+      });
+      const aText = aPlain.join(' ').replace(/\s+/g, ' ').trim();
+      if(aText && aHtml){
+        entry.a = aText; entry.aHtml = aHtml; entry.aSegs = aSegs;
+        // The reader's "identical to the book's answer" note compares against
+        // this, not the full explanation, which nobody would type out.
+        if(first && first.text) entry.aCmp = first.text;
+        stats.answered++;
       }
       if(!sets.has(q.ci)){
         sets.set(q.ci, { title: book.chapters[q.ci].title, match: 'key',

@@ -247,6 +247,13 @@
      scrolling rather than clipping. */
   .exQ{font-size:var(--readSize);line-height:1.45;font-weight:600;font-family:var(--readFont)}
   .exQ .exNum{color:var(--dim);font-weight:700;margin-right:5px}
+  /* Structured question / answer (Maya): one .exBlk per source paragraph, so the
+     panel keeps the page's paragraphs, bold/italic and lists. white-space is
+     reset because the answer card is pre-wrap for the plain-text answers. */
+  .exBlk{white-space:normal;margin:0 0 .45em}
+  .exBlk:last-child{margin-bottom:0}
+  .exQ .exNum + .exBlk{display:inline}
+  .exQ .exNum + .exBlk + .exBlk{margin-top:.45em}
   .exRow{display:flex;gap:8px;align-items:stretch}
   .exPanel textarea{flex:1;min-height:2.4em;max-height:6em;resize:vertical;
     background:var(--bg);border:1px solid var(--line);border-radius:10px;
@@ -1325,7 +1332,7 @@
     sets.forEach(function(set){
       (set.items||[]).forEach(function(it){
         var rec={ set:set, n:it.n, block:it.block, from:it.from, to:it.to,
-                  q:it.q, a:it.a, aHtml:it.aHtml, aSegs:it.aSegs };
+                  q:it.q, qHtml:it.qHtml, a:it.a, aHtml:it.aHtml, aSegs:it.aSegs, aCmp:it.aCmp };
         (exByBlock[it.block] || (exByBlock[it.block]=[])).push(rec);
         exTotal++;
       });
@@ -1346,7 +1353,7 @@
     var it=exActive;
     $('exTag').textContent = it.set.title ? it.set.title : 'Exercise';
     $('exQ').innerHTML = '<span class="exNum">'+it.n+'.</span>' +
-      escapeHtmlJs(it.q.replace(/^\s*\d+\s*[.)]\s*/, ''));
+      (it.qHtml ? it.qHtml : escapeHtmlJs(it.q.replace(/^\s*\d+\s*[.)]\s*/, '')));
     $('exCompare').style.display='none';
     $('exAskRow').style.display='flex';
     $('exNext').style.display='none';
@@ -1382,7 +1389,8 @@
     }
     // A neutral observation, not a grade: identical strings are worth
     // pointing out, anything else is for the reader to judge.
-    var same = it.a && normalizeAnswer(typed) && normalizeAnswer(typed)===normalizeAnswer(it.a);
+    var cmp = it.aCmp || it.a;
+    var same = cmp && normalizeAnswer(typed) && normalizeAnswer(typed)===normalizeAnswer(cmp);
     $('exSame').style.display = same ? '' : 'none';
     if(same) $('exSame').textContent = 'Identical to the book\u2019s answer.';
     $('exCompare').style.display='flex';
