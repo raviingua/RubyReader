@@ -595,6 +595,7 @@
       <div class="ctlRow ctlBottom">
         <button class="ctlBtn langBtn sel" id="langBtnFR" data-lang="fr">FR<small>read</small></button>
         <button class="ctlBtn langBtn sel" id="langBtnEN" data-lang="en">EN<small>read</small></button>
+        <button class="ctlBtn langBtn sel" id="langBtnGL" data-lang="gl" title="Read each line's ruby gloss aloud, in the English voice, once that line finishes">GL<small>read</small></button>
         <div class="wpmRow"><button data-wpm="fr" data-d="-10">&minus;</button><span class="val" id="wpmValFR">150</span><span class="lbl">FR</span><button data-wpm="fr" data-d="10">+</button></div>
         <div class="wpmRow"><button data-wpm="en" data-d="-10">&minus;</button><span class="val" id="wpmValEN">250</span><span class="lbl">EN</span><button data-wpm="en" data-d="10">+</button></div>
       </div>
@@ -1119,8 +1120,15 @@
      one off skips every fragment tagged with that language, which turns a
      mixed paragraph into "just the French bits" or "just the English bits" —
      the nearest thing this app has to the other two apps' single-language
-     modes. The text on screen never changes; only what's spoken does. */
-  var langEnabled={fr:true, en:true};
+     modes. The text on screen never changes; only what's spoken does.
+
+     GL (gloss) is a third toggle living in the same map so it gets the same
+     click wiring below for free, but it isn't a segment language like fr/en —
+     buildUnits() never looks at it, so turning it off skips no segment. It
+     gates a separate thing entirely: whether the gloss under a line's <rt>
+     tags gets read aloud, in English, right after that line finishes. On by
+     default, same as fr/en. */
+  var langEnabled={fr:true, en:true, gl:true};
   document.addEventListener('click',function(e){
     var b=e.target.closest('.langBtn'); if(!b)return;
     var lang=b.dataset.lang;
@@ -1837,6 +1845,40 @@
     u.onend=finish; u.onerror=finish;
     window.speechSynthesis.speak(u);
   }
+  // The gloss for one unit, read the same way it appears on the page: every
+  // <rt> inside that unit's rendered span(s), in document order, joined into
+  // one phrase. Not derived from the build-time data — read straight out of
+  // the DOM that's already on screen, which is also why this feature needed
+  // no change to the builder or the data format at all.
+  function glossTextForUnit(unit){
+    var el=$('blockEl'); if(!el || !unit) return '';
+    var spans=el.querySelectorAll('.ttsSeg[data-seg="'+unit.i+'"]');
+    var parts=[];
+    for(var i=0;i<spans.length;i++){
+      var rts=spans[i].querySelectorAll('rt');
+      for(var j=0;j<rts.length;j++){
+        var t=rts[j].textContent.trim();
+        if(t && t!=='\u2014') parts.push(t);
+      }
+    }
+    return parts.join(' ');
+  }
+  // Spoken in the English voice regardless of which language the line itself
+  // was — the gloss is English (or a pronunciation respelling) either way,
+  // never French. onEnd fires immediately, with nothing spoken, when the
+  // line had no gloss or GL read is off, so callers never need to branch.
+  function speakGloss(unit, onEnd){
+    if(!langEnabled.gl || !hasTTS){ onEnd(); return; }
+    var text=glossTextForUnit(unit);
+    if(!text){ onEnd(); return; }
+    var chunk={ unit:unit, gloss:true };
+    activeChunk=chunk;
+    var u=new SpeechSynthesisUtterance(text);
+    applyVoiceSettings(u, 'en');
+    function finish(){ if(activeChunk!==chunk) return; activeChunk=null; onEnd(); }
+    u.onend=finish; u.onerror=finish;
+    window.speechSynthesis.speak(u);
+  }
   // Wraps speakUnit with a one-time retry: if our utterance is still the
   // active one ~450ms in yet the engine reports nothing is speaking, that's
   // the known WebKit/iOS bug where speak() straight after cancel() (exactly
@@ -1877,6 +1919,13 @@
     }
   }
   function unitDone(){
+    if(!playing || paused) return;
+    // The unit that just finished — captured before unitIdx moves past it,
+    // since its gloss (if GL read is on) is read before advancing, not after.
+    var justFinished = units && units[unitIdx];
+    speakGloss(justFinished, advanceUnit);
+  }
+  function advanceUnit(){
     if(!playing || paused) return;
     unitIdx++;
     if(exActive && !exAwaiting){
