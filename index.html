@@ -515,6 +515,20 @@
       <p class="hint">A short silence inserted wherever a paragraph switches between
         French and English, so the two don't run together. Set it to 0 for no gap.</p>
     </div>
+
+    <div class="field"><label>FR delay factor</label>
+      <div class="wpmRow"><button data-frd="-1">&minus;</button><span class="val" id="frdVal">1.0</span><span class="lbl">&times;</span><button data-frd="1">+</button></div>
+      <p class="hint">Used by the FR delay button: the silence after each French sentence is
+        the time it took to read, multiplied by this. 1.0 is the same length; 2.0 leaves twice as
+        long to repeat it; 0.5 leaves half.</p>
+    </div>
+
+    <div class="field">
+      <button class="pill" id="clearCacheBtn" style="align-self:flex-start;padding:10px 16px">Clear remembered settings</button>
+      <p class="hint">Forgets the settings this page remembers between visits (language buttons, speeds,
+        pauses, voices, theme and colours, exercise mode, and where you were reading) and starts again
+        from the defaults. Your passphrase, text sizes and gloss colour are not touched.</p>
+    </div>
   </section>
 
   <section id="reader">
@@ -767,6 +781,10 @@
     currentBook=b; currentChapterIdx=ci; updateChapterNavUI();
     $('err').textContent='';
     loadBlocks(c.blocks, c);
+    if(pendingBlock){
+      var pb=pendingBlock; pendingBlock=null;
+      if(pb.book===b.id && pb.ci===ci && pb.blk>0 && pb.blk<c.blocks.length) gotoBlock(pb.blk,false);
+    }
     syncChapterSelect();
     updateMediaSessionMetadata();
     flashChapter(chapterTitle(b.chapters[ci]));
@@ -788,7 +806,7 @@
   }
 
   fetch(DATA_DIR+'/manifest.json').then(function(r){ if(!r.ok)throw 0; return r.json(); })
-    .then(function(m){ MANIFEST=m; $('passField').style.display = m.crypto ? '' : 'none'; })
+    .then(function(m){ MANIFEST=m; $('passField').style.display = m.crypto ? '' : 'none'; restoreSelection(); })
     .catch(function(){ $('libNote').textContent='Library couldn\u2019t load here — it needs to be served over https (e.g. GitHub Pages or localhost), with a '+DATA_DIR+'/ folder built by build_books_ruby.js.';
       bookInput.disabled=true; chapSel.disabled=true; passInput.disabled=true; loadBtn.disabled=true; });
 
@@ -817,6 +835,7 @@
      one right matters more: a wrong French voice doesn't just sound off, it
      makes half of every mixed sentence unintelligible. */
   var voices=[];
+  var pendingVoice={fr:'',en:''};   // remembered voice choice, applied once the voice list has loaded
   function loadVoices(){ try{ voices=window.speechSynthesis.getVoices()||[]; }catch(e){ voices=[]; } fillVoiceSelects(); }
   function fillVoiceSelects(){ fillVoiceSelect('voiceSelectFR','fr'); fillVoiceSelect('voiceSelectEN','en'); }
   function fillVoiceSelect(id,two){
@@ -826,7 +845,8 @@
     sel.innerHTML='<option value="">Automatic</option>';
     list.forEach(function(v){ var o=document.createElement('option'); o.value=v.voiceURI;
       o.textContent=v.name+' ('+v.lang+')'+(v.default?' – default':''); sel.appendChild(o); });
-    if(prev){ sel.value=prev; }
+    var want=prev||pendingVoice[two];
+    if(want){ sel.value=want; }
   }
   function defaultVoice(){ return voices.filter(function(v){return v.default;})[0]||null; }
   function voiceScore(v){ var n=(v.name||'').toLowerCase(), s=0;
@@ -915,6 +935,19 @@
     renderGap();
   });
   renderGap();
+
+  /* FR delay factor: multiplies the silence FR delay leaves after a French
+     sentence. Steps of 0.1, kept to one decimal so repeated presses don't
+     drift (0.1+0.2 style) into 1.2000000000000002. */
+  var frDelayFactor=1, FRD_MIN=0.1, FRD_MAX=5;
+  function renderFrd(){ $('frdVal').textContent=frDelayFactor.toFixed(1); }
+  document.addEventListener('click',function(e){
+    var b=e.target.closest('[data-frd]'); if(!b)return;
+    var n=Math.round((frDelayFactor+parseInt(b.dataset.frd,10)*0.1)*10)/10;
+    frDelayFactor=Math.max(FRD_MIN,Math.min(FRD_MAX,n));
+    renderFrd();
+  });
+  renderFrd();
 
   /* ========== app theme ========== */
   var appTheme='auto';
@@ -1958,7 +1991,7 @@
     // there is no speech engine), so the learner can repeat it. This sits
     // before the gloss, and applies whether or not the line has one.
     if(langEnabled.frd && justFinished && justFinished.lang==='fr'){
-      var wait = justFinished.spokenMs>=250 ? justFinished.spokenMs : durationForUnit(justFinished);
+      var wait = (justFinished.spokenMs>=250 ? justFinished.spokenMs : durationForUnit(justFinished)) * frDelayFactor;
       clearTimeout(gapTimer);
       gapTimer=setTimeout(function(){
         if(playing && !paused) speakGloss(justFinished, advanceUnit);
@@ -2216,6 +2249,105 @@
     else if(zone==='left') prevBlock();
     else replayBlock();
   });
+
+
+  /* ========== remembered settings ==========
+     One JSON record under a single key. It is written by a once-a-second
+     check that only touches storage when something actually changed (plus on
+     leaving the page), rather than from every handler, so no control has to
+     know about it. Restoring runs once, here at the end, after every control
+     and its state exist. Voices are kept in pendingVoice rather than read
+     from the dropdowns, because the dropdowns are empty until the browser
+     reports its voice list, and reading them early would overwrite the
+     remembered choice with "Automatic".
+     Where you were reading restores the book / part / chapter pick and, when
+     you open that chapter, the block. It does not open the reader by itself:
+     that needs the passphrase and a deliberate Load. */
+  var SETTINGS_KEY='rdrSettings', settingsClearing=false, lastSaved='';
+  function readSaved(){
+    try{ var o=JSON.parse(localStorage.getItem(SETTINGS_KEY)||'null'); return (o && typeof o==='object') ? o : null; }
+    catch(e){ return null; }
+  }
+  var savedSettings=readSaved();
+  var lastPos=(savedSettings && savedSettings.pos) || null;
+  var pendingBlock=null;
+
+  function collectSettings(){
+    var def=stagePalette(resolvedTheme());
+    var bg=$('bgPick').value, tx=$('textPick').value;
+    if(currentBook) lastPos={ book:currentBook.id, ci:currentChapterIdx, blk:idx };
+    return {
+      v:1,
+      lang:{ fr:langEnabled.fr, en:langEnabled.en, gl:langEnabled.gl, frd:langEnabled.frd },
+      wpm:{ fr:wpm.fr, en:wpm.en },
+      gap:langGapMs, frd:frDelayFactor,
+      voice:{ fr:pendingVoice.fr, en:pendingVoice.en },
+      method:{ fr:voiceMethod.fr, en:voiceMethod.en },
+      theme:appTheme,
+      palette:(bg===def[0] && tx===def[1]) ? null : [bg,tx],   // only a custom pick; the default follows the theme
+      ex:exMode,
+      pos:lastPos
+    };
+  }
+  function persistSettings(){
+    if(settingsClearing) return;
+    try{
+      var str=JSON.stringify(collectSettings());
+      if(str!==lastSaved){ localStorage.setItem(SETTINGS_KEY,str); lastSaved=str; }
+    }catch(e){}
+  }
+
+  function restoreSelection(){
+    var p=lastPos; if(!p || !MANIFEST) return;
+    var b=MANIFEST.books.filter(function(x){ return x.id===p.book; })[0]; if(!b) return;
+    var c=b.chapters[p.ci]; if(!c) return;
+    chooseBook(b);
+    partSel.value=String(chapterPart(c,p.ci)); fillChapters();
+    chapSel.value=String(p.ci);
+    pendingBlock=p;
+  }
+
+  $('voiceSelectFR').addEventListener('change',function(){ pendingVoice.fr=this.value; });
+  $('voiceSelectEN').addEventListener('change',function(){ pendingVoice.en=this.value; });
+
+  (function restoreSettings(){
+    var s=savedSettings; if(!s) return;
+    function num(v,lo,hi){ v=+v; return (isFinite(v) && v>=lo && v<=hi) ? v : null; }
+    try{
+      if(s.lang) ['fr','en','gl','frd'].forEach(function(k){
+        if(typeof s.lang[k]!=='boolean') return;
+        langEnabled[k]=s.lang[k];
+        var b=document.querySelector('.langBtn[data-lang="'+k+'"]');
+        if(b) b.classList.toggle('sel', langEnabled[k]);
+      });
+      if(s.wpm) ['fr','en'].forEach(function(t){ var v=num(s.wpm[t],WPM_MIN,WPM_MAX); if(v!==null) wpm[t]=v; });
+      renderWpm();
+      var g=num(s.gap,GAP_MIN,GAP_MAX); if(g!==null) langGapMs=g; renderGap();
+      var f=num(s.frd,FRD_MIN,FRD_MAX); if(f!==null) frDelayFactor=Math.round(f*10)/10; renderFrd();
+      if(s.method) ['fr','en'].forEach(function(t){
+        if(/^(auto|m1|m2|m3)$/.test(s.method[t])){ voiceMethod[t]=s.method[t]; $('voiceMethod'+t.toUpperCase()).value=s.method[t]; }
+      });
+      if(s.voice){
+        ['fr','en'].forEach(function(t){ if(typeof s.voice[t]==='string') pendingVoice[t]=s.voice[t]; });
+        fillVoiceSelects();
+      }
+      if(s.theme==='auto' || s.theme==='light' || s.theme==='dark'){ appTheme=s.theme; segSelect('themeSeg',appTheme); }
+      applyAppTheme();
+      if(Array.isArray(s.palette) && /^#[0-9a-f]{6}$/i.test(s.palette[0]) && /^#[0-9a-f]{6}$/i.test(s.palette[1])) applyPalette(s.palette[0],s.palette[1]);
+      if(typeof s.ex==='boolean'){ exMode=s.ex; applyExModeBtn(); updateRbNote(); }
+    }catch(e){}
+  })();
+
+  $('clearCacheBtn').addEventListener('click',function(){
+    if(!window.confirm('Clear the remembered settings and start again from the defaults?\n\nYour passphrase, text sizes and gloss colour are kept.')) return;
+    settingsClearing=true;                       // stop the page re-saving itself on the way out
+    try{ localStorage.removeItem(SETTINGS_KEY); }catch(e){}
+    window.location.reload();
+  });
+
+  setInterval(persistSettings, 1000);
+  window.addEventListener('pagehide', persistSettings);
+  document.addEventListener('visibilitychange', function(){ if(document.hidden) persistSettings(); });
 
 })();
 </script>
