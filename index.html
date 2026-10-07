@@ -596,6 +596,7 @@
         <button class="ctlBtn langBtn sel" id="langBtnFR" data-lang="fr">FR<small>read</small></button>
         <button class="ctlBtn langBtn sel" id="langBtnEN" data-lang="en">EN<small>read</small></button>
         <button class="ctlBtn langBtn sel" id="langBtnGL" data-lang="gl" title="Read each line's ruby gloss aloud, in the English voice, once that line finishes">GL<small>read</small></button>
+        <button class="ctlBtn langBtn" id="langBtnGLD" data-lang="gld" title="Before reading a line's gloss, wait as long as the French line took to read, so you can repeat it aloud. Needs GL read on.">GL<small>delay</small></button>
         <div class="wpmRow"><button data-wpm="fr" data-d="-10">&minus;</button><span class="val" id="wpmValFR">150</span><span class="lbl">FR</span><button data-wpm="fr" data-d="10">+</button></div>
         <div class="wpmRow"><button data-wpm="en" data-d="-10">&minus;</button><span class="val" id="wpmValEN">250</span><span class="lbl">EN</span><button data-wpm="en" data-d="10">+</button></div>
       </div>
@@ -1128,7 +1129,7 @@
      gates a separate thing entirely: whether the gloss under a line's <rt>
      tags gets read aloud, in English, right after that line finishes. On by
      default, same as fr/en. */
-  var langEnabled={fr:true, en:true, gl:true};
+  var langEnabled={fr:true, en:true, gl:true, gld:false};   // gld = GL delay, off by default
   document.addEventListener('click',function(e){
     var b=e.target.closest('.langBtn'); if(!b)return;
     var lang=b.dataset.lang;
@@ -1839,9 +1840,11 @@
   function speakUnit(unit, onEnd){
     var chunk={ unit:unit };
     activeChunk=chunk;
+    var startedAt=Date.now();
+    unit.glossDelayed=false;   // a fresh reading of the line (e.g. after pause) gets its delay again
     var u=new SpeechSynthesisUtterance(unit.text);
     applyVoiceSettings(u, unit.lang);
-    function finish(){ if(activeChunk!==chunk) return; activeChunk=null; onEnd(); }
+    function finish(){ if(activeChunk!==chunk) return; activeChunk=null; unit.spokenMs=Date.now()-startedAt; onEnd(); }
     u.onend=finish; u.onerror=finish;
     window.speechSynthesis.speak(u);
   }
@@ -1850,8 +1853,24 @@
   // one phrase. Not derived from the build-time data — read straight out of
   // the DOM that's already on screen, which is also why this feature needed
   // no change to the builder or the data format at all.
+  // A block whose <rt> text is a pronunciation respelling ("mah-TAHNT") rather
+  // than a translation. Shape test, same idea as the build step: a hyphenated
+  // plain-ASCII token with an ALL-CAPS syllable. One such token marks the whole
+  // block, because respelled lines also contain bare syllables ("ay", "duh")
+  // that carry no hyphen or capitals. English glosses never have that shape.
+  function blockGlossIsPronunciation(el){
+    var rts=el.querySelectorAll('rt');
+    for(var i=0;i<rts.length;i++){
+      var w=rts[i].textContent.trim().split(/\s+/);
+      for(var j=0;j<w.length;j++){
+        if(/-/.test(w[j]) && /[A-Z]{2,}/.test(w[j]) && /^[\x20-\x7e]+$/.test(w[j])) return true;
+      }
+    }
+    return false;
+  }
   function glossTextForUnit(unit){
     var el=$('blockEl'); if(!el || !unit) return '';
+    if(blockGlossIsPronunciation(el)) return '';   // shown, never read
     var spans=el.querySelectorAll('.ttsSeg[data-seg="'+unit.i+'"]');
     var parts=[];
     for(var i=0;i<spans.length;i++){
@@ -1871,6 +1890,17 @@
     if(!langEnabled.gl || !hasTTS){ onEnd(); return; }
     var text=glossTextForUnit(unit);
     if(!text){ onEnd(); return; }
+    // GL delay: stay silent for as long as the line itself took, so the
+    // learner can repeat it. Uses the measured time; if that looks wrong
+    // (engine error, instant finish) falls back to the word-count estimate.
+    if(langEnabled.gld && !unit.glossDelayed){
+      unit.glossDelayed=true;
+      var wait = unit.spokenMs>=250 ? unit.spokenMs : durationForUnit(unit);
+      clearTimeout(gapTimer);
+      gapTimer=setTimeout(function(){ if(playing && !paused) speakGloss(unit, onEnd); }, wait);
+      return;
+    }
+    unit.glossDelayed=false;
     var chunk={ unit:unit, gloss:true };
     activeChunk=chunk;
     var u=new SpeechSynthesisUtterance(text);
