@@ -376,8 +376,15 @@
      the top row, where a thumb reaches it, and is the only filled control —
      everything else is an outline, so the eye goes straight to it. */
   .ctlRow{flex:0 0 auto;display:grid;gap:6px;padding:7px 12px;background:var(--panel)}
-  .ctlTop{grid-template-columns:repeat(5,1fr);padding-bottom:3px}
-  .ctlBottom{grid-template-columns:repeat(4,1fr);padding-top:3px;padding-bottom:12px}
+  .ctlTop{grid-template-columns:repeat(5,minmax(0,1fr));padding-bottom:3px}
+  .ctlBottom{grid-template-columns:repeat(4,minmax(0,1fr));padding-top:3px;padding-bottom:12px}
+  /* minmax(0,..) lets a column shrink below its content, and the speed
+     steppers take two columns each, so nothing forces the row wider than the
+     screen. Without this the steppers' minimum width stretched every column
+     and the buttons never got smaller in portrait. */
+  .ctlBottom .wpmRow{grid-column:span 2;min-width:0;gap:4px}
+  .ctlBottom .wpmRow .lbl{min-width:0}
+  .ctlBtn{min-width:0;overflow:hidden}
   .ctlBtn{padding:8px 4px;min-height:44px;border-radius:10px;background:var(--bg);
     border:1px solid var(--line);color:var(--dim);font-size:16px;line-height:1;
     display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px}
@@ -409,6 +416,11 @@
   .cpanel .done{padding:12px;border-radius:10px;background:var(--accent);color:#fff;font-weight:600;font-size:14px}
 
   @media (max-width:420px){
+    .ctlRow{padding-left:8px;padding-right:8px;gap:4px}
+    .ctlBtn.langBtn{font-size:12px;letter-spacing:0}
+    .ctlBtn small{font-size:9px;letter-spacing:0}
+    .ctlBottom .wpmRow{padding:4px 5px}
+    .ctlBottom .wpmRow button{width:28px;height:28px}
     .topbar{padding:0 50px 0 8px}
     .topbar-row{gap:4px}
     .pill{padding:5px 9px;font-size:11px}
@@ -594,9 +606,9 @@
       </div>
       <div class="ctlRow ctlBottom">
         <button class="ctlBtn langBtn sel" id="langBtnFR" data-lang="fr">FR<small>read</small></button>
+        <button class="ctlBtn langBtn" id="langBtnFRD" data-lang="frd" title="After each French sentence, stay silent for as long as it took to read, so you can repeat it aloud">FR<small>delay</small></button>
         <button class="ctlBtn langBtn sel" id="langBtnEN" data-lang="en">EN<small>read</small></button>
         <button class="ctlBtn langBtn sel" id="langBtnGL" data-lang="gl" title="Read each line's ruby gloss aloud, in the English voice, once that line finishes">GL<small>read</small></button>
-        <button class="ctlBtn langBtn" id="langBtnGLD" data-lang="gld" title="Before reading a line's gloss, wait as long as the French line took to read, so you can repeat it aloud. Needs GL read on.">GL<small>delay</small></button>
         <div class="wpmRow"><button data-wpm="fr" data-d="-10">&minus;</button><span class="val" id="wpmValFR">150</span><span class="lbl">FR</span><button data-wpm="fr" data-d="10">+</button></div>
         <div class="wpmRow"><button data-wpm="en" data-d="-10">&minus;</button><span class="val" id="wpmValEN">250</span><span class="lbl">EN</span><button data-wpm="en" data-d="10">+</button></div>
       </div>
@@ -1129,7 +1141,7 @@
      gates a separate thing entirely: whether the gloss under a line's <rt>
      tags gets read aloud, in English, right after that line finishes. On by
      default, same as fr/en. */
-  var langEnabled={fr:true, en:true, gl:true, gld:false};   // gld = GL delay, off by default
+  var langEnabled={fr:true, en:true, gl:true, frd:false};   // frd = FR delay, off by default
   document.addEventListener('click',function(e){
     var b=e.target.closest('.langBtn'); if(!b)return;
     var lang=b.dataset.lang;
@@ -1841,7 +1853,6 @@
     var chunk={ unit:unit };
     activeChunk=chunk;
     var startedAt=Date.now();
-    unit.glossDelayed=false;   // a fresh reading of the line (e.g. after pause) gets its delay again
     var u=new SpeechSynthesisUtterance(unit.text);
     applyVoiceSettings(u, unit.lang);
     function finish(){ if(activeChunk!==chunk) return; activeChunk=null; unit.spokenMs=Date.now()-startedAt; onEnd(); }
@@ -1890,17 +1901,6 @@
     if(!langEnabled.gl || !hasTTS){ onEnd(); return; }
     var text=glossTextForUnit(unit);
     if(!text){ onEnd(); return; }
-    // GL delay: stay silent for as long as the line itself took, so the
-    // learner can repeat it. Uses the measured time; if that looks wrong
-    // (engine error, instant finish) falls back to the word-count estimate.
-    if(langEnabled.gld && !unit.glossDelayed){
-      unit.glossDelayed=true;
-      var wait = unit.spokenMs>=250 ? unit.spokenMs : durationForUnit(unit);
-      clearTimeout(gapTimer);
-      gapTimer=setTimeout(function(){ if(playing && !paused) speakGloss(unit, onEnd); }, wait);
-      return;
-    }
-    unit.glossDelayed=false;
     var chunk={ unit:unit, gloss:true };
     activeChunk=chunk;
     var u=new SpeechSynthesisUtterance(text);
@@ -1953,6 +1953,18 @@
     // The unit that just finished — captured before unitIdx moves past it,
     // since its gloss (if GL read is on) is read before advancing, not after.
     var justFinished = units && units[unitIdx];
+    // FR delay: after a French sentence, stay silent for as long as it took to
+    // read (measured in speakUnit; word-count estimate if that looks wrong or
+    // there is no speech engine), so the learner can repeat it. This sits
+    // before the gloss, and applies whether or not the line has one.
+    if(langEnabled.frd && justFinished && justFinished.lang==='fr'){
+      var wait = justFinished.spokenMs>=250 ? justFinished.spokenMs : durationForUnit(justFinished);
+      clearTimeout(gapTimer);
+      gapTimer=setTimeout(function(){
+        if(playing && !paused) speakGloss(justFinished, advanceUnit);
+      }, wait);
+      return;
+    }
     speakGloss(justFinished, advanceUnit);
   }
   function advanceUnit(){
