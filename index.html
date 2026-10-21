@@ -145,6 +145,13 @@
   .fsPlay.on{display:block}
   .stage[data-light="1"] .fsPlay{background:rgba(255,255,255,.65);color:#333;border-color:#ccc}
   .stage[data-light="1"] .hideToggle{background:rgba(255,255,255,.65);color:#333;border-color:#ccc}
+  /* Close and previous / next chapter for the hidden-controls (full screen)
+     view. The top bar, and the buttons in it, are hidden with the rest of the
+     controls, so these sit in the opposite corner to play and show-controls
+     and only appear while they do. */
+  .fsNav{position:absolute;top:8px;left:10px;z-index:6;display:none;align-items:center;gap:6px}
+  .fsNav.on{display:flex}
+  .stage[data-light="1"] .fsNav .pill{background:rgba(255,255,255,.65);color:#333;border-color:#ccc}
   /* The pill row WRAPS onto as many rows as it needs instead of scrolling
      sideways. A single sideways-scrolling row of a dozen pills was hard to
      reach the end of on a narrow screen, and on some it could not be scrolled
@@ -288,11 +295,11 @@
   .rbBlock ruby{ruby-position:over;-webkit-ruby-position:before;ruby-align:center;
     display:ruby;line-height:1.15}
   /* The gloss. Colour and size are both independent of the French line:
-     --glossCol is switched between blue and grey by its own button, and
+     --glossCol is always blue (see applyPalette), and
      --glossScale by its own +/- pair, so the gloss can be made faint and small
      once you barely need it without shrinking the text you are reading.
-     Blue matches the source books (#1a4db3); both colours are swapped for
-     lighter variants on a dark background, because #1a4db3 on black is almost
+     Blue matches the source books (#1a4db3); it is swapped for a
+     lighter variant on a dark background, because #1a4db3 on black is almost
      unreadable. Full opacity — the colour carries the distinction, and dimming
      on top of it just made the gloss muddy. */
   .rbBlock rt{font-size:calc(.55em * var(--glossScale,1));font-weight:400;font-style:normal;
@@ -430,6 +437,8 @@
     .textDisplay{padding:var(--topPad,52px) 6% 16px}
     .hideToggle{top:4px;right:6px;padding:5px 8px;font-size:11px}
     .fsPlay{top:4px;right:44px;padding:5px 8px;font-size:11px}
+    .fsNav{top:4px;left:6px;gap:4px}
+    .fsNav .pill{padding:5px 8px;font-size:11px}
     .fsPlay.pos-bottom{top:auto;right:auto;bottom:55px;padding:10px 21px;font-size:17px}
   }
 </style>
@@ -526,8 +535,8 @@
     <div class="field">
       <button class="pill" id="clearCacheBtn" style="align-self:flex-start;padding:10px 16px">Clear remembered settings</button>
       <p class="hint">Forgets the settings this page remembers between visits (language buttons, speeds,
-        pauses, voices, theme and colours, exercise mode, and where you were reading) and starts again
-        from the defaults. Your passphrase, text sizes and gloss colour are not touched.</p>
+        pauses, voices, theme and colours, exercise mode, GL order, scroll view, full screen, and where you were reading) and starts again
+        from the defaults. Your passphrase and text sizes are not touched.</p>
     </div>
   </section>
 
@@ -551,7 +560,7 @@
           <button class="pill" data-act="glossDown" title="Smaller glosses (does not change the French)">G&#8722;</button>
           <button class="pill" data-act="glossUp" title="Larger glosses (does not change the French)">G&#43;</button>
           <button class="pill" data-act="fontReset" title="Reset every text size to default — both the text and the glosses">&#8635;</button>
-          <button class="pill" id="glossColBtn" title="Switch the gloss colour between blue and grey">Gloss: Blue</button>
+          <button class="pill" id="glOrderBtn" title="Read each line's gloss after the line (GL Last) or before it (GL First). Only affects glossed lines.">GL Last</button>
           <button class="pill" id="hlBtn" title="Cycle how the part being read is highlighted (off / underline / gray)">Highlight: Off</button>
           <button class="pill" id="repeatBtn" title="Repeat each block 0, 1, or 2 extra times">Repeat: Off</button>
           <button class="pill" id="tintBtn" title="Colour the French fragments so the language switching is visible">Tint: Off</button>
@@ -564,6 +573,11 @@
       </div>
       <button class="pill icon fsPlay" id="fsPlayBtn" title="Play / pause">&#9658;</button>
       <button class="pill icon hideToggle" id="hideBtn" title="Hide all controls">⤢</button>
+      <div class="fsNav" id="fsNav">
+        <button class="pill" id="fsCloseBtn" title="Close and go back to the book list">✕ Close</button>
+        <button class="pill" id="fsPrevBtn" title="Previous chapter">‹ Prev</button>
+        <button class="pill" id="fsNextBtn" title="Next chapter">Next ›</button>
+      </div>
       <div class="chapterToast" id="chapterToast"></div>
       <div class="textDisplay" id="textDisplay"><div class="inner" id="textInner"></div></div>
       <div class="pageInd" id="pageInd">
@@ -622,7 +636,7 @@
         <button class="ctlBtn langBtn sel" id="langBtnFR" data-lang="fr">FR<small>read</small></button>
         <button class="ctlBtn langBtn" id="langBtnFRD" data-lang="frd" title="After each French sentence, stay silent for as long as it took to read, so you can repeat it aloud">FR<small>delay</small></button>
         <button class="ctlBtn langBtn sel" id="langBtnEN" data-lang="en">EN<small>read</small></button>
-        <button class="ctlBtn langBtn sel" id="langBtnGL" data-lang="gl" title="Read each line's ruby gloss aloud, in the English voice, once that line finishes">GL<small>read</small></button>
+        <button class="ctlBtn langBtn sel" id="langBtnGL" data-lang="gl" title="Read each line's ruby gloss aloud (in the other language's voice) once that line finishes">GL<small>read</small></button>
         <div class="wpmRow"><button data-wpm="fr" data-d="-10">&minus;</button><span class="val" id="wpmValFR">150</span><span class="lbl">FR</span><button data-wpm="fr" data-d="10">+</button></div>
         <div class="wpmRow"><button data-wpm="en" data-d="-10">&minus;</button><span class="val" id="wpmValEN">250</span><span class="lbl">EN</span><button data-wpm="en" data-d="10">+</button></div>
       </div>
@@ -828,6 +842,10 @@
     loadChapterByIndex(currentBook,(currentChapterIdx+1)%n,keep);
   });
   $('closeBtn').onclick=function(){ stop(); $('reader').classList.remove('on'); $('reader').style.display='none'; $('setup').style.display='flex'; };
+  // Full-screen copies of Close / Prev / Next: they just press the top bar's own buttons.
+  $('fsCloseBtn').onclick=function(){ $('closeBtn').click(); };
+  $('fsPrevBtn').onclick=function(){ $('prevChapterBtn').click(); };
+  $('fsNextBtn').onclick=function(){ $('nextChapterBtn').click(); };
 
   /* ========== voices ==========
      Two independent voice slots, one per language. Unlike the other two
@@ -966,9 +984,8 @@
     // English-block colour did.
     d.setProperty('--frTint', isLight ? '#1a4db3' : '#8ab4f8');
     // #1a4db3 is the blue the source books use, and it is unreadable on a dark
-    // stage; the grey pair gets the same treatment.
-    d.setProperty('--glossBlue', isLight ? '#1a4db3' : '#8ab4f8');
-    d.setProperty('--glossGray', isLight ? '#5f6368' : '#9aa0a6');
+    // stage. The gloss is always this blue; there is no grey option.
+    d.setProperty('--glossCol', isLight ? '#1a4db3' : '#8ab4f8');
   }
   function syncStageTheme(){ var c=stagePalette(resolvedTheme()); applyPalette(c[0],c[1]); }
   function applyAppTheme(){ document.documentElement.setAttribute('data-theme', appTheme==='auto' ? (systemPrefersDark()?'dark':'light') : appTheme); syncStageTheme(); }
@@ -1071,25 +1088,17 @@
   }catch(e){}
   applyFontScale();
 
-  /* ---- gloss colour ----
-     Blue by default, matching the source books. The two concrete colours for
-     each mode are set alongside the stage palette (see applyPalette), because
-     the right blue depends on whether the background is light or dark;
-     --glossCol just points at whichever pair is selected, and the indirection
-     re-resolves on its own when the palette changes. */
-  var glossColor='blue';
-  function applyGlossColor(){
-    document.documentElement.style.setProperty('--glossCol',
-      glossColor==='blue' ? 'var(--glossBlue)' : 'var(--glossGray)');
-    $('glossColBtn').textContent='Gloss: '+(glossColor==='blue'?'Blue':'Gray');
-    try{ localStorage.setItem('glossColor', glossColor); }catch(e){}
-  }
-  try{ var gc=localStorage.getItem('glossColor'); if(gc==='gray'||gc==='blue') glossColor=gc; }catch(e){}
-  $('glossColBtn').addEventListener('click', function(){
-    glossColor = (glossColor==='blue') ? 'gray' : 'blue';
-    applyGlossColor();
-  });
-  applyGlossColor();
+  /* ---- gloss order (GL Last / GL First) ----
+     The gloss colour is no longer a choice (always blue, see applyPalette);
+     this pill picks the reading ORDER of a glossed line instead. GL Last
+     (default) reads the line, then its gloss. GL First reads the gloss, then
+     the line. Nothing else changes: the FR delay still follows the French line
+     and the gap at a language switch still falls between lines. A change takes
+     effect from the next line. Remembered with the other settings. */
+  var glFirst=false;
+  function applyGlOrderBtn(){ $('glOrderBtn').textContent = glFirst ? 'GL First' : 'GL Last'; }
+  $('glOrderBtn').addEventListener('click', function(){ glFirst=!glFirst; applyGlOrderBtn(); });
+  applyGlOrderBtn();
 
   /* ========== chapter toast / flash ==========
      One overlay element, two uses. The ⓘ button shows book + chapter for a
@@ -1154,6 +1163,7 @@
     $('topbar').style.pointerEvents = controlsHidden?'none':'auto';
     $('controls').classList.toggle('hidden',controlsHidden);
     $('fsPlayBtn').classList.toggle('on', controlsHidden);
+    $('fsNav').classList.toggle('on', controlsHidden);
     $('hideBtn').textContent = controlsHidden ? '⤡' : '⤢';
     $('hideBtn').title = controlsHidden ? 'Show all controls' : 'Hide all controls';
     syncTopPad();
@@ -1926,18 +1936,35 @@
     }
     return parts.join(' ');
   }
-  // Spoken in the English voice regardless of which language the line itself
-  // was — the gloss is English (or a pronunciation respelling) either way,
-  // never French. onEnd fires immediately, with nothing spoken, when the
-  // line had no gloss or GL read is off, so callers never need to branch.
+  // Which language is this gloss in? The gloss is normally the OTHER language
+  // from the line it sits on: English under French lines, but French under
+  // English lines in the swapped "Read with the translations" sections.
+  // Look at the gloss text first (clear French or English wording wins); when
+  // the text is too short or ambiguous ("walking", "Tintin"), fall back to
+  // "the opposite of the line's own language".
+  var FR_WORDS=/^(le|la|les|un|une|des|du|de|au|aux|et|est|sont|je|tu|il|elle|on|nous|vous|ils|elles|ce|cet|cette|ces|qui|que|qu|ne|pas|dans|pour|sur|avec|sans|son|sa|ses|mon|ma|mes|ton|ta|tes|se|y|en|à|où|mais|ou|donc|très|plus|aussi|si|comme|chez|par|il|lui|leur|leurs|être|avoir|fait|font|va|vont|a|ont|suis|es|êtes|sommes|l|d|j|s|c|n|m|t)$/i;
+  var EN_WORDS=/^(the|a|an|and|is|are|was|were|be|been|to|of|in|on|at|with|without|for|from|by|he|she|it|we|they|i|you|his|her|its|their|my|your|our|this|that|these|those|who|which|what|not|no|do|does|did|has|have|had|will|would|can|could|but|or|as|if|so|very|more|just|there|here|then|than|him|them|us|me|into|about|up|out|over|after|before)$/i;
+  function guessGlossLang(text, unitLang){
+    var fr=0, en=0;
+    if(/[àâäçéèêëîïôöûùüœÿ]/i.test(text)) fr+=2;
+    var w=text.toLowerCase().replace(/[’']/g,' ').split(/[^a-zà-ÿœ]+/).filter(Boolean);
+    for(var i=0;i<w.length;i++){
+      var f=FR_WORDS.test(w[i]), e=EN_WORDS.test(w[i]);
+      if(f && !e) fr++; else if(e && !f) en++;
+    }
+    if(fr>en) return 'fr';
+    if(en>fr) return 'en';
+    return unitLang==='fr' ? 'en' : 'fr';
+  }
   function speakGloss(unit, onEnd){
     if(!langEnabled.gl || !hasTTS){ onEnd(); return; }
     var text=glossTextForUnit(unit);
     if(!text){ onEnd(); return; }
     var chunk={ unit:unit, gloss:true };
     activeChunk=chunk;
+    var gLang=guessGlossLang(text, unit.lang);
     var u=new SpeechSynthesisUtterance(text);
-    applyVoiceSettings(u, 'en');
+    applyVoiceSettings(u, gLang);
     function finish(){ if(activeChunk!==chunk) return; activeChunk=null; onEnd(); }
     u.onend=finish; u.onerror=finish;
     window.speechSynthesis.speak(u);
@@ -1961,6 +1988,16 @@
     }, 450);
   }
 
+  // One line, in the chosen order. GL Last (default): the line, then its gloss
+  // (read in unitDone). GL First: the gloss now, then the line, after which
+  // unitDone goes straight on. The order is fixed when the line starts, so
+  // clicking the button mid-line cannot read its gloss twice or not at all.
+  var unitGlFirst=false;
+  function speakLine(unit){
+    unitGlFirst=glFirst;
+    if(unitGlFirst) speakGloss(unit, function(){ if(playing && !paused) speakUnit(unit, unitDone); });
+    else speakUnit(unit, unitDone);
+  }
   function runUnit(){
     if(!playing || paused || exAwaiting) return;
     var unit=units && units[unitIdx];
@@ -1976,9 +2013,9 @@
     lastSpokenLang=unit.lang;
     if(needGap){
       clearTimeout(gapTimer);
-      gapTimer=setTimeout(function(){ if(playing && !paused) speakUnit(unit, unitDone); }, langGapMs);
+      gapTimer=setTimeout(function(){ if(playing && !paused) speakLine(unit); }, langGapMs);
     } else {
-      speakUnit(unit, unitDone);
+      speakLine(unit);
     }
   }
   function unitDone(){
@@ -1986,6 +2023,9 @@
     // The unit that just finished — captured before unitIdx moves past it,
     // since its gloss (if GL read is on) is read before advancing, not after.
     var justFinished = units && units[unitIdx];
+    // After the line: its gloss (GL Last), or straight on (GL First, where the
+    // gloss was already read before the line).
+    var afterLine = unitGlFirst ? advanceUnit : function(){ speakGloss(justFinished, advanceUnit); };
     // FR delay: after a French sentence, stay silent for as long as it took to
     // read (measured in speakUnit; word-count estimate if that looks wrong or
     // there is no speech engine), so the learner can repeat it. This sits
@@ -1994,11 +2034,11 @@
       var wait = (justFinished.spokenMs>=250 ? justFinished.spokenMs : durationForUnit(justFinished)) * frDelayFactor;
       clearTimeout(gapTimer);
       gapTimer=setTimeout(function(){
-        if(playing && !paused) speakGloss(justFinished, advanceUnit);
+        if(playing && !paused) afterLine();
       }, wait);
       return;
     }
-    speakGloss(justFinished, advanceUnit);
+    afterLine();
   }
   function advanceUnit(){
     if(!playing || paused) return;
@@ -2286,6 +2326,9 @@
       theme:appTheme,
       palette:(bg===def[0] && tx===def[1]) ? null : [bg,tx],   // only a custom pick; the default follows the theme
       ex:exMode,
+      glFirst:glFirst,
+      view:setupView,                           // scroll-mode view: 'block' or 'chapter'
+      fs:controlsHidden,                        // full screen = controls hidden
       pos:lastPos
     };
   }
@@ -2335,11 +2378,17 @@
       applyAppTheme();
       if(Array.isArray(s.palette) && /^#[0-9a-f]{6}$/i.test(s.palette[0]) && /^#[0-9a-f]{6}$/i.test(s.palette[1])) applyPalette(s.palette[0],s.palette[1]);
       if(typeof s.ex==='boolean'){ exMode=s.ex; applyExModeBtn(); updateRbNote(); }
+      if(typeof s.fs==='boolean' && s.fs){ controlsHidden=true; applyHidden(); }
+      if(typeof s.glFirst==='boolean'){ glFirst=s.glFirst; applyGlOrderBtn(); }
+      if(s.view==='block' || s.view==='chapter'){
+        setupView=s.view; segSelect('viewSeg', setupView);
+        if(!bookMode){ viewAll=(setupView==='chapter'); applyViewBtn(); }
+      }
     }catch(e){}
   })();
 
   $('clearCacheBtn').addEventListener('click',function(){
-    if(!window.confirm('Clear the remembered settings and start again from the defaults?\n\nYour passphrase, text sizes and gloss colour are kept.')) return;
+    if(!window.confirm('Clear the remembered settings and start again from the defaults?\n\nYour passphrase and text sizes are kept.')) return;
     settingsClearing=true;                       // stop the page re-saving itself on the way out
     try{ localStorage.removeItem(SETTINGS_KEY); }catch(e){}
     window.location.reload();
