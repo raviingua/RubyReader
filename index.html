@@ -534,7 +534,7 @@
 
     <div class="field"><label>EN delay factor</label>
       <div class="wpmRow"><button data-end="-1">&minus;</button><span class="val" id="endVal">1.0</span><span class="lbl">&times;</span><button data-end="1">+</button></div>
-      <p class="hint">Used by the EN delay button: the silence after each English sentence is
+      <p class="hint">Used by the EN delay button: the silence after each English sentence (or English gloss) is
         the time it took to read, multiplied by this. 1.0 is the same length; 2.0 leaves twice as
         long to repeat it; 0.5 leaves half.</p>
     </div>
@@ -643,7 +643,7 @@
         <button class="ctlBtn langBtn sel" id="langBtnFR" data-lang="fr">FR<small>read</small></button>
         <button class="ctlBtn langBtn" id="langBtnFRD" data-lang="frd" title="After each French sentence, stay silent for as long as it took to read, so you can repeat it aloud">FR<small>delay</small></button>
         <button class="ctlBtn langBtn sel" id="langBtnEN" data-lang="en">EN<small>read</small></button>
-        <button class="ctlBtn langBtn" id="langBtnEND" data-lang="end" title="After each English sentence, stay silent for as long as it took to read, so you can repeat it aloud">EN<small>delay</small></button>
+        <button class="ctlBtn langBtn" id="langBtnEND" data-lang="end" title="After each English sentence, and after an English gloss, stay silent for as long as it took to read, so you can repeat it or answer it aloud">EN<small>delay</small></button>
         <div class="wpmRow"><button data-wpm="fr" data-d="-10">&minus;</button><span class="val" id="wpmValFR">150</span><span class="lbl">FR</span><button data-wpm="fr" data-d="10">+</button></div>
         <div class="wpmRow"><button data-wpm="en" data-d="-10">&minus;</button><span class="val" id="wpmValEN">250</span><span class="lbl">EN</span><button data-wpm="en" data-d="10">+</button></div>
       </div>
@@ -1992,7 +1992,23 @@
     var gLang=guessGlossLang(text, unit.lang);
     var u=new SpeechSynthesisUtterance(text);
     applyVoiceSettings(u, gLang);
-    function finish(){ if(activeChunk!==chunk) return; activeChunk=null; onEnd(); }
+    var startedAt=Date.now();
+    function finish(){
+      if(activeChunk!==chunk) return;
+      activeChunk=null;
+      // EN delay also follows a gloss that is read in English: silence for as
+      // long as it took to read (word-count estimate if that looks wrong),
+      // times the EN delay factor. Not after a French gloss, and nothing at
+      // all when no gloss was read.
+      if(gLang==='en' && langEnabled.end){
+        var took=Date.now()-startedAt;
+        var wait=(took>=250 ? took : durationForUnit({ text:text, lang:'en' })) * enDelayFactor;
+        clearTimeout(gapTimer);
+        gapTimer=setTimeout(function(){ if(playing && !paused) onEnd(); }, wait);
+        return;
+      }
+      onEnd();
+    }
     u.onend=finish; u.onerror=finish;
     window.speechSynthesis.speak(u);
   }
