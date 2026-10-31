@@ -532,6 +532,13 @@
         long to repeat it; 0.5 leaves half.</p>
     </div>
 
+    <div class="field"><label>EN delay factor</label>
+      <div class="wpmRow"><button data-end="-1">&minus;</button><span class="val" id="endVal">1.0</span><span class="lbl">&times;</span><button data-end="1">+</button></div>
+      <p class="hint">Used by the EN delay button: the silence after each English sentence is
+        the time it took to read, multiplied by this. 1.0 is the same length; 2.0 leaves twice as
+        long to repeat it; 0.5 leaves half.</p>
+    </div>
+
     <div class="field">
       <button class="pill" id="clearCacheBtn" style="align-self:flex-start;padding:10px 16px">Clear remembered settings</button>
       <p class="hint">Forgets the settings this page remembers between visits (language buttons, speeds,
@@ -560,7 +567,7 @@
           <button class="pill" data-act="glossDown" title="Smaller glosses (does not change the French)">G&#8722;</button>
           <button class="pill" data-act="glossUp" title="Larger glosses (does not change the French)">G&#43;</button>
           <button class="pill" data-act="fontReset" title="Reset every text size to default — both the text and the glosses">&#8635;</button>
-          <button class="pill" id="glOrderBtn" title="Read each line's gloss after the line (GL Last) or before it (GL First). Only affects glossed lines.">GL Last</button>
+          <button class="pill" id="glOrderBtn" title="Gloss reading: GL Last reads each line's gloss after the line, GL First reads it before the line, GL Off reads no gloss. Click to cycle. Only affects glossed lines.">GL Last</button>
           <button class="pill" id="hlBtn" title="Cycle how the part being read is highlighted (off / underline / gray)">Highlight: Off</button>
           <button class="pill" id="repeatBtn" title="Repeat each block 0, 1, or 2 extra times">Repeat: Off</button>
           <button class="pill" id="tintBtn" title="Colour the French fragments so the language switching is visible">Tint: Off</button>
@@ -636,7 +643,7 @@
         <button class="ctlBtn langBtn sel" id="langBtnFR" data-lang="fr">FR<small>read</small></button>
         <button class="ctlBtn langBtn" id="langBtnFRD" data-lang="frd" title="After each French sentence, stay silent for as long as it took to read, so you can repeat it aloud">FR<small>delay</small></button>
         <button class="ctlBtn langBtn sel" id="langBtnEN" data-lang="en">EN<small>read</small></button>
-        <button class="ctlBtn langBtn sel" id="langBtnGL" data-lang="gl" title="Read each line's ruby gloss aloud (in the other language's voice) once that line finishes">GL<small>read</small></button>
+        <button class="ctlBtn langBtn" id="langBtnEND" data-lang="end" title="After each English sentence, stay silent for as long as it took to read, so you can repeat it aloud">EN<small>delay</small></button>
         <div class="wpmRow"><button data-wpm="fr" data-d="-10">&minus;</button><span class="val" id="wpmValFR">150</span><span class="lbl">FR</span><button data-wpm="fr" data-d="10">+</button></div>
         <div class="wpmRow"><button data-wpm="en" data-d="-10">&minus;</button><span class="val" id="wpmValEN">250</span><span class="lbl">EN</span><button data-wpm="en" data-d="10">+</button></div>
       </div>
@@ -967,6 +974,18 @@
   });
   renderFrd();
 
+  /* EN delay factor: exactly the same as the FR one, for English sentences
+     (same step, same limits). */
+  var enDelayFactor=1;
+  function renderEnd(){ $('endVal').textContent=enDelayFactor.toFixed(1); }
+  document.addEventListener('click',function(e){
+    var b=e.target.closest('[data-end]'); if(!b)return;
+    var n=Math.round((enDelayFactor+parseInt(b.dataset.end,10)*0.1)*10)/10;
+    enDelayFactor=Math.max(FRD_MIN,Math.min(FRD_MAX,n));
+    renderEnd();
+  });
+  renderEnd();
+
   /* ========== app theme ========== */
   var appTheme='auto';
   function systemPrefersDark(){ return !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches); }
@@ -1088,17 +1107,25 @@
   }catch(e){}
   applyFontScale();
 
-  /* ---- gloss order (GL Last / GL First) ----
-     The gloss colour is no longer a choice (always blue, see applyPalette);
-     this pill picks the reading ORDER of a glossed line instead. GL Last
-     (default) reads the line, then its gloss. GL First reads the gloss, then
-     the line. Nothing else changes: the FR delay still follows the French line
-     and the gap at a language switch still falls between lines. A change takes
-     effect from the next line. Remembered with the other settings. */
+  /* ---- gloss: GL Last / GL First / GL Off ----
+     One pill for everything about reading the gloss; there is no separate GL
+     read button. GL Last (default) reads the line, then its gloss. GL First
+     reads the gloss, then the line. GL Off reads no gloss at all. Nothing else
+     changes: the FR / EN delay still follows its line and the gap at a
+     language switch still falls between lines. A click cycles Last -> First ->
+     Off -> Last, and a change takes effect from the next line. It drives the
+     same two remembered flags as before (langEnabled.gl = read glosses at all,
+     glFirst = before the line). The gloss colour is no longer a choice (always
+     blue, see applyPalette). langEnabled is declared further down, so the label
+     is first set by the saved-settings restore (the HTML default is GL Last). */
   var glFirst=false;
-  function applyGlOrderBtn(){ $('glOrderBtn').textContent = glFirst ? 'GL First' : 'GL Last'; }
-  $('glOrderBtn').addEventListener('click', function(){ glFirst=!glFirst; applyGlOrderBtn(); });
-  applyGlOrderBtn();
+  function applyGlOrderBtn(){ $('glOrderBtn').textContent = !langEnabled.gl ? 'GL Off' : (glFirst ? 'GL First' : 'GL Last'); }
+  $('glOrderBtn').addEventListener('click', function(){
+    if(!langEnabled.gl){ langEnabled.gl=true; glFirst=false; }       // Off   -> Last
+    else if(glFirst){ langEnabled.gl=false; glFirst=false; }         // First -> Off
+    else { glFirst=true; }                                           // Last  -> First
+    applyGlOrderBtn();
+  });
 
   /* ========== chapter toast / flash ==========
      One overlay element, two uses. The ⓘ button shows book + chapter for a
@@ -1178,13 +1205,13 @@
      the nearest thing this app has to the other two apps' single-language
      modes. The text on screen never changes; only what's spoken does.
 
-     GL (gloss) is a third toggle living in the same map so it gets the same
-     click wiring below for free, but it isn't a segment language like fr/en —
+     GL (gloss) lives in the same map but is switched by its own three-way pill
+     (GL Last / GL First / GL Off), and it isn't a segment language like fr/en —
      buildUnits() never looks at it, so turning it off skips no segment. It
      gates a separate thing entirely: whether the gloss under a line's <rt>
      tags gets read aloud, in English, right after that line finishes. On by
      default, same as fr/en. */
-  var langEnabled={fr:true, en:true, gl:true, frd:false};   // frd = FR delay, off by default
+  var langEnabled={fr:true, en:true, gl:true, frd:false, end:false};   // frd / end = FR / EN delay, off by default
   document.addEventListener('click',function(e){
     var b=e.target.closest('.langBtn'); if(!b)return;
     var lang=b.dataset.lang;
@@ -2021,17 +2048,21 @@
   function unitDone(){
     if(!playing || paused) return;
     // The unit that just finished — captured before unitIdx moves past it,
-    // since its gloss (if GL read is on) is read before advancing, not after.
+    // since its gloss (unless GL is off) is read before advancing, not after.
     var justFinished = units && units[unitIdx];
     // After the line: its gloss (GL Last), or straight on (GL First, where the
     // gloss was already read before the line).
     var afterLine = unitGlFirst ? advanceUnit : function(){ speakGloss(justFinished, advanceUnit); };
-    // FR delay: after a French sentence, stay silent for as long as it took to
-    // read (measured in speakUnit; word-count estimate if that looks wrong or
-    // there is no speech engine), so the learner can repeat it. This sits
+    // FR / EN delay: after a French (or English) sentence, stay silent for as
+    // long as it took to read (measured in speakUnit; word-count estimate if
+    // that looks wrong or there is no speech engine), so the learner can repeat
+    // it. Each language has its own on/off button and its own factor. This sits
     // before the gloss, and applies whether or not the line has one.
-    if(langEnabled.frd && justFinished && justFinished.lang==='fr'){
-      var wait = (justFinished.spokenMs>=250 ? justFinished.spokenMs : durationForUnit(justFinished)) * frDelayFactor;
+    var delayFactor = !justFinished ? 0
+      : justFinished.lang==='fr' ? (langEnabled.frd ? frDelayFactor : 0)
+      : justFinished.lang==='en' ? (langEnabled.end ? enDelayFactor : 0) : 0;
+    if(delayFactor){
+      var wait = (justFinished.spokenMs>=250 ? justFinished.spokenMs : durationForUnit(justFinished)) * delayFactor;
       clearTimeout(gapTimer);
       gapTimer=setTimeout(function(){
         if(playing && !paused) afterLine();
@@ -2318,9 +2349,9 @@
     if(currentBook) lastPos={ book:currentBook.id, ci:currentChapterIdx, blk:idx };
     return {
       v:1,
-      lang:{ fr:langEnabled.fr, en:langEnabled.en, gl:langEnabled.gl, frd:langEnabled.frd },
+      lang:{ fr:langEnabled.fr, en:langEnabled.en, gl:langEnabled.gl, frd:langEnabled.frd, end:langEnabled.end },
       wpm:{ fr:wpm.fr, en:wpm.en },
-      gap:langGapMs, frd:frDelayFactor,
+      gap:langGapMs, frd:frDelayFactor, end:enDelayFactor,
       voice:{ fr:pendingVoice.fr, en:pendingVoice.en },
       method:{ fr:voiceMethod.fr, en:voiceMethod.en },
       theme:appTheme,
@@ -2357,7 +2388,7 @@
     var s=savedSettings; if(!s) return;
     function num(v,lo,hi){ v=+v; return (isFinite(v) && v>=lo && v<=hi) ? v : null; }
     try{
-      if(s.lang) ['fr','en','gl','frd'].forEach(function(k){
+      if(s.lang) ['fr','en','gl','frd','end'].forEach(function(k){
         if(typeof s.lang[k]!=='boolean') return;
         langEnabled[k]=s.lang[k];
         var b=document.querySelector('.langBtn[data-lang="'+k+'"]');
@@ -2367,6 +2398,7 @@
       renderWpm();
       var g=num(s.gap,GAP_MIN,GAP_MAX); if(g!==null) langGapMs=g; renderGap();
       var f=num(s.frd,FRD_MIN,FRD_MAX); if(f!==null) frDelayFactor=Math.round(f*10)/10; renderFrd();
+      var fe=num(s.end,FRD_MIN,FRD_MAX); if(fe!==null) enDelayFactor=Math.round(fe*10)/10; renderEnd();
       if(s.method) ['fr','en'].forEach(function(t){
         if(/^(auto|m1|m2|m3)$/.test(s.method[t])){ voiceMethod[t]=s.method[t]; $('voiceMethod'+t.toUpperCase()).value=s.method[t]; }
       });
@@ -2379,7 +2411,8 @@
       if(Array.isArray(s.palette) && /^#[0-9a-f]{6}$/i.test(s.palette[0]) && /^#[0-9a-f]{6}$/i.test(s.palette[1])) applyPalette(s.palette[0],s.palette[1]);
       if(typeof s.ex==='boolean'){ exMode=s.ex; applyExModeBtn(); updateRbNote(); }
       if(typeof s.fs==='boolean' && s.fs){ controlsHidden=true; applyHidden(); }
-      if(typeof s.glFirst==='boolean'){ glFirst=s.glFirst; applyGlOrderBtn(); }
+      if(typeof s.glFirst==='boolean') glFirst=s.glFirst;
+      applyGlOrderBtn();   // label from both saved flags (GL Last / First / Off)
       if(s.view==='block' || s.view==='chapter'){
         setupView=s.view; segSelect('viewSeg', setupView);
         if(!bookMode){ viewAll=(setupView==='chapter'); applyViewBtn(); }
