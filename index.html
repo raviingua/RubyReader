@@ -245,6 +245,15 @@
     padding:12px 14px 14px;display:none;flex-direction:column;gap:9px;
     max-height:72%;overflow-y:auto;color:var(--text)}
   .exPanel.on{display:flex}
+  /* Where the panel sits. Bottom is the original (no extra class). Top hangs
+     from just under the top bar (--topPad, so the bar and the full-screen
+     buttons stay reachable) and grows downward. Middle centres in the space
+     below the bar and grows both ways as the answer appears. The accent rule
+     moves to the edge(s) facing the text. */
+  .exPanel.exTop,.exPanel.exMid{max-height:min(72%, calc(100% - var(--topPad,0px) - 12px))}
+  .exPanel.exTop{top:var(--topPad,0px);bottom:auto;border-top:0;border-bottom:2px solid var(--accent)}
+  .exPanel.exMid{top:calc(var(--topPad,0px) + (100% - var(--topPad,0px)) / 2);bottom:auto;
+    transform:translateY(-50%);border-top:2px solid var(--accent);border-bottom:2px solid var(--accent)}
   .exTag{font-size:10px;letter-spacing:.7px;text-transform:uppercase;color:var(--accent);font-weight:700}
   /* The question and the book's answer ARE book text, so they are set in the
      reading face at the reading size — at 15px they were markedly smaller
@@ -282,6 +291,9 @@
   .exProgress{font-size:11.5px;color:var(--dim);font-variant-numeric:tabular-nums;margin-left:auto}
   @media (max-width:420px){
     .exPanel{padding:10px 11px 12px;max-height:80%}
+  }
+  @media (max-width:420px){
+    .exPanel.exTop,.exPanel.exMid{max-height:min(80%, calc(100% - var(--topPad,0px) - 12px))}
   }
 
   /* ===== ruby interlinear glosses =====
@@ -478,6 +490,9 @@
     <div class="field" id="viewField"><label>View <span style="text-transform:none;color:var(--dim)">(scroll mode)</span></label>
       <div class="seg" id="viewSeg"><button data-v="block" class="sel">Block</button><button data-v="chapter">Chapter</button></div>
     </div>
+    <div class="field"><label>Exercise position</label>
+      <div class="seg" id="exPosSeg"><button data-v="top" class="sel">Top</button><button data-v="middle">Middle</button><button data-v="bottom">Bottom</button></div>
+    </div>
     <div class="field" id="colsField" style="display:none"><label>Columns <span style="text-transform:none;color:var(--dim)">(book mode)</span></label>
       <div class="seg" id="colsSeg"><button data-v="1" class="sel">1</button><button data-v="2">2</button><button data-v="3">3</button><button data-v="4">4</button></div>
     </div>
@@ -542,7 +557,7 @@
     <div class="field">
       <button class="pill" id="clearCacheBtn" style="align-self:flex-start;padding:10px 16px">Clear remembered settings</button>
       <p class="hint">Forgets the settings this page remembers between visits (language buttons, speeds,
-        pauses, voices, theme and colours, exercise mode, GL order, scroll view, full screen, and where you were reading) and starts again
+        pauses, voices, theme and colours, exercise mode, exercise position, GL order, scroll view, full screen, and where you were reading) and starts again
         from the defaults. Your passphrase and text sizes are not touched.</p>
     </div>
   </section>
@@ -1062,6 +1077,17 @@
       if(blocks && blocks.length) renderBlock();
     }
   });
+  /* ---- where the exercise panel sits ----
+     Top (the default), Middle or Bottom. Bottom is how it always was; the
+     other two are CSS classes on the panel. Remembered with the other settings. */
+  var exPos='top';
+  function applyExPos(){
+    var p=$('exPanel');
+    p.classList.toggle('exTop', exPos==='top');
+    p.classList.toggle('exMid', exPos==='middle');
+  }
+  seg('exPosSeg', function(v){ exPos=v; applyExPos(); });
+  applyExPos();
   seg('colsSeg', function(v){
     setupCols=parseInt(v,10)||1;
     cols=setupCols;
@@ -2373,6 +2399,7 @@
       theme:appTheme,
       palette:(bg===def[0] && tx===def[1]) ? null : [bg,tx],   // only a custom pick; the default follows the theme
       ex:exMode,
+      exPos:exPos,                              // exercise panel: 'top', 'middle' or 'bottom'
       glFirst:glFirst,
       view:setupView,                           // scroll-mode view: 'block' or 'chapter'
       fs:controlsHidden,                        // full screen = controls hidden
@@ -2426,6 +2453,7 @@
       applyAppTheme();
       if(Array.isArray(s.palette) && /^#[0-9a-f]{6}$/i.test(s.palette[0]) && /^#[0-9a-f]{6}$/i.test(s.palette[1])) applyPalette(s.palette[0],s.palette[1]);
       if(typeof s.ex==='boolean'){ exMode=s.ex; applyExModeBtn(); updateRbNote(); }
+      if(s.exPos==='top' || s.exPos==='middle' || s.exPos==='bottom'){ exPos=s.exPos; segSelect('exPosSeg', exPos); applyExPos(); }
       if(typeof s.fs==='boolean' && s.fs){ controlsHidden=true; applyHidden(); }
       if(typeof s.glFirst==='boolean') glFirst=s.glFirst;
       applyGlOrderBtn();   // label from both saved flags (GL Last / First / Off)
