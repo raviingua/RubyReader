@@ -78,7 +78,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   const exChapter = titles.findIndex(t => CHAPTER_RE.test(t));
   if(exChapter < 0){ console.error('FAIL: no exercise chapter in this build'); process.exit(1); }
   console.log('exercise chapter:', titles[exChapter].slice(0,70));
-  chapSel.value = String(exChapter);
+  chapSel.value = chapSel.options[exChapter].value;
   doc.getElementById('bookPass').value = PASS;
   doc.getElementById('loadChapterBtn').click();
   await sleep(800);

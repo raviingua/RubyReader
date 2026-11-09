@@ -270,6 +270,9 @@
   .exBlk:last-child{margin-bottom:0}
   .exQ .exNum + .exBlk{display:inline}
   .exQ .exNum + .exBlk + .exBlk{margin-top:.45em}
+  /* A whole-set question is the entire exercise — lists, tables, a dialogue —
+     so it is set at text weight rather than as one bold line. */
+  .exQ.whole{font-weight:400}
   .exRow{display:flex;gap:8px;align-items:stretch}
   .exPanel textarea{flex:1;min-height:2.4em;max-height:6em;resize:vertical;
     background:var(--bg);border:1px solid var(--line);border-radius:10px;
@@ -1449,7 +1452,8 @@
     sets.forEach(function(set){
       (set.items||[]).forEach(function(it){
         var rec={ set:set, n:it.n, block:it.block, from:it.from, to:it.to,
-                  q:it.q, qHtml:it.qHtml, a:it.a, aHtml:it.aHtml, aSegs:it.aSegs, aCmp:it.aCmp };
+                  q:it.q, qHtml:it.qHtml, a:it.a, aHtml:it.aHtml, aSegs:it.aSegs, aCmp:it.aCmp,
+                  whole:!!it.whole };
         (exByBlock[it.block] || (exByBlock[it.block]=[])).push(rec);
         exTotal++;
       });
@@ -1469,8 +1473,13 @@
     exAwaiting=true;
     var it=exActive;
     $('exTag').textContent = it.set.title ? it.set.title : 'Exercise';
-    $('exQ').innerHTML = '<span class="exNum">'+it.n+'.</span>' +
+    // A whole-set question (matching, sorting, ordering, a dialogue to fill
+    // in…) is the entire exercise, asked once: no line number, and the
+    // prompt says it wants the whole set.
+    $('exQ').innerHTML = (it.whole ? '' : '<span class="exNum">'+it.n+'.</span>') +
       (it.qHtml ? it.qHtml : escapeHtmlJs(it.q.replace(/^\s*\d+\s*[.)]\s*/, '')));
+    $('exQ').classList.toggle('whole', !!it.whole);
+    $('exInput').placeholder = it.whole ? 'Answer the whole set…' : 'Type your answer, then Enter…';
     $('exCompare').style.display='none';
     $('exAskRow').style.display='flex';
     $('exNext').style.display='none';
@@ -1508,6 +1517,13 @@
     // pointing out, anything else is for the reader to judge.
     var cmp = it.aCmp || it.a;
     var same = cmp && normalizeAnswer(typed) && normalizeAnswer(typed)===normalizeAnswer(cmp);
+    // A whole-set key ("1 = d, 2 = f", "C, E, A, D, B") is the same answer
+    // however it is spaced or punctuated: "1d 2f", "1-d, 2-f", "CEADB". A
+    // matching key also counts as typed when only its letters are ("d f").
+    if(it.whole && cmp && !same){
+      var t=normalizeAnswer(typed).replace(/ /g,''), c=normalizeAnswer(cmp).replace(/ /g,'');
+      same = !!t && (t===c || (/^(\d+[a-z])+$/.test(c) && t===c.replace(/\d+/g,'')));
+    }
     $('exSame').style.display = same ? '' : 'none';
     if(same) $('exSame').textContent = 'Identical to the book\u2019s answer.';
     $('exCompare').style.display='flex';

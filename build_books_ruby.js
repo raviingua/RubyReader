@@ -394,6 +394,19 @@ function textOf(node){
 }
 // The text as it will be SPOKEN: ruby bases only, glosses dropped.
 function speechOf(node){ return speechText(textOf(node)); }
+// The same, for the exercise matcher's copy of a line (_lines, _rows): a <br>
+// counts as a space. textOf joins the text on either side of a <br> with
+// nothing in between, so "…une bonne semaine.<br/>(Last week…" became
+// "semaine.(Last" — one word to the sentence splitter, and the answer's first
+// English sentence was then read in the French voice. The page never had the
+// problem: inlineTokens turns <br> into a line break of its own.
+function flowTextOf(node){
+  if(node.type === 'text') return node.text;
+  if(node.name === 'rt') return '';
+  if(node.name === 'br') return ' ';
+  return (node.children || []).map(flowTextOf).join('');
+}
+function flowSpeechOf(node){ return speechText(flowTextOf(node)); }
 
 /* ---- inline tokens ----
  * Every inline run becomes a list of tokens carrying BOTH the HTML to show
@@ -564,7 +577,7 @@ function buildInlineBlock(el, type, ctx, extra){
   const block = Object.assign({ type: type, html: html, segs: segs }, extra || {});
   if(ctx.quote) block.quote = true;
   if(ctx.box) block.box = ctx.box;
-  block._lines = [{ raw: speechOf(el), segFrom: 0, segTo: counter.n - 1 }];
+  block._lines = [{ raw: flowSpeechOf(el), segFrom: 0, segTo: counter.n - 1 }];
   ctx.seed = segs.length ? segs[segs.length-1].lang : ctx.seed;
   return block;
 }
@@ -574,15 +587,21 @@ function buildListBlock(el, ctx){
   const force = classLang(el, ctx.lang);
   const ordered = el.name === 'ol';
   const type = (el.attrs && el.attrs.type) || '';
+  // <ol start="7"> continues the numbering of an earlier list (vb05 splits
+  // one exercise into JOUER 1-6, MANGER 7-9, FAIRE 10-12). Dropping it made
+  // the page and the exercise panel both count 1, 2, 3 again.
+  const startAttr = ordered && el.attrs ? String(el.attrs.start || '').trim() : '';
+  const start = /^-?\d+$/.test(startAttr) ? parseInt(startAttr, 10) : 1;
   const lines = [];
-  let html = '<'+(ordered ? 'ol' : 'ul')+' class="rbList"'+(type ? ' type="'+escapeHtml(type)+'"' : '')+'>';
+  let html = '<'+(ordered ? 'ol' : 'ul')+' class="rbList"'+(type ? ' type="'+escapeHtml(type)+'"' : '')
+           +(start !== 1 ? ' start="'+start+'"' : '')+'>';
   for(const li of (el.children || [])){
     if(li.type !== 'element' || li.name !== 'li') continue;
     const liForce = classLang(li, force);
     const from = counter.n;
     const inner = renderSegs(segmentTokens(inlineTokens(li, [], 'plain'), ctx.seed, liForce), counter, segs);
     html += '<li>' + inner + '</li>';
-    lines.push({ raw: speechOf(li), segFrom: from, segTo: counter.n - 1 });
+    lines.push({ raw: flowSpeechOf(li), segFrom: from, segTo: counter.n - 1 });
   }
   html += '</'+(ordered ? 'ol' : 'ul')+'>';
   if(!segs.length && !lines.length) return null;
@@ -591,6 +610,7 @@ function buildListBlock(el, ctx){
   if(ctx.quote) block.quote = true;
   if(ctx.box) block.box = ctx.box;
   block._lines = lines;
+  if(start !== 1) block._start = start;
   return block;
 }
 
@@ -634,7 +654,7 @@ function buildTableBlock(el, ctx){
       html += '<'+tag+'>'+inner+'</'+tag+'>';
     });
     html += '</tr>';
-    if(!isHead) rowMap.push({ cells: cells.map(speechOf), segFrom: from, segTo: counter.n - 1 });
+    if(!isHead) rowMap.push({ cells: cells.map(flowSpeechOf), segFrom: from, segTo: counter.n - 1 });
   });
   html += '</table>';
   if(!segs.length && !rowMap.length) return null;
@@ -702,6 +722,10 @@ function extractBook(file){
         if(level <= 3){
           const c = startChapter(text, level);
           c.titleEl = ch;
+          // The box the heading itself sits in (a tip box's own title, say),
+          // as opposed to the box of whatever follows it. Exercise matching
+          // only; removed by stripBuildScaffolding.
+          c._headBox = ctx.box || null;
         } else {
           push(buildInlineBlock(ch, 'heading', ctx, { level: level }));
         }
@@ -909,9 +933,10 @@ const TOPIC_GENERIC_WORDS = new Set(['grammaire','grammar','vocabulaire','vocabu
 function itemsFromBlock(bl, blockIdx){
   if(bl.type === 'list'){
     if(bl.listType && OPTION_LIST.test(bl.listType)) return [];
+    const first = bl._start || 1;
     return (bl._lines || []).map((ln, i) => {
       const m = NUM_PREFIX.exec(ln.raw);
-      return { num: m ? parseInt(m[1],10) : (i+1), pos: i+1, blockIdx: blockIdx,
+      return { num: m ? parseInt(m[1],10) : (first+i), pos: i+1, blockIdx: blockIdx,
                segFrom: ln.segFrom, segTo: ln.segTo, text: ln.raw };
     });
   }
@@ -964,14 +989,16 @@ function collectGroups(book){
     // "Check your answer" lists were read as stray numbered items and counted
     // as unmatched questions. Never set for books that don't use that layout.
     if(ch._qaPaired) return;
-    let cur = { title: ch.title, chapterIdx: ci, ancestry: ancestry.slice(),
-                box: null, items: [], blockFrom: 0 };
+    // parents: the headings ABOVE the group (its ancestry minus its own title).
+    let cur = { title: ch.title, chapterIdx: ci, ancestry: ancestry.slice(), parents: ancestry.slice(0, -1),
+                box: null, headBox: ch._headBox || null, items: [], blockFrom: 0 };
     groups.push(cur);
     ch.blocks.forEach((bl, bi) => {
       if(bl.type === 'heading' && !bl.chapterTitle){
+        cur.blockTo = bi - 1;
         cur = { title: speechText(bl.html.replace(/<[^>]+>/g,' ')),
-                chapterIdx: ci, ancestry: ancestry.slice(), box: bl.box || null,
-                items: [], blockFrom: bi };
+                chapterIdx: ci, ancestry: ancestry.slice(), parents: ancestry.slice(), box: bl.box || null,
+                headBox: bl.box || null, items: [], blockFrom: bi };
         groups.push(cur);
         return;
       }
@@ -987,14 +1014,51 @@ function collectGroups(book){
         cur._emptyNum = null;
         return;
       }
+      // A list or table in a note box INSIDE an exercise — the prescription
+      // the questions are about, a tip — is material to read, not lines to
+      // answer. Counted as questions, it made vb05's "H. Les instructions
+      // médicales" nine lines against a six-answer key: no answers at all.
+      if(bl.box === 'note' && cur.box === 'exercise'){ cur._emptyNum = null; return; }
       const its = itemsFromBlock(bl, bi);
       cur._emptyNum = (bl.type === 'p' && its.length === 1 && /^\s*\d+\s*[.)]\s*$/.test(its[0].text)) ? its[0] : null;
       cur.items.push(...its);
     });
+    cur.blockTo = ch.blocks.length - 1;    // a group runs to the next heading or the chapter's end
+  });
+  // Two or more lettered lists in one group ("A. envoyez / B. enverrez / …"
+  // under each "Question 8:") are the choices of multiple-choice questions,
+  // not questions: a typed <ol type="a"> is skipped already, and a list
+  // lettered in its text is now skipped the same way. Counted as questions,
+  // a mock exam's ten questions became forty option lines, matched a forty-
+  // answer Corrigé by count alone, and every option got some other
+  // question's answer. In such a group only a NUMBERED line can be a
+  // question; an unnumbered one is part of the document being read (a
+  // Mini-TEF's notice, line by line) and goes too, or it would be paired
+  // with the answers whenever its line count happened to match the key's.
+  // (ONE lettered list is left alone: the option pool of a matching
+  // exercise, or the lettered parts a, b, c of the exercise.)
+  groups.forEach(g => {
+    if(g.items.length < 4) return;
+    const blocks = book.chapters[g.chapterIdx].blocks, lettered = new Set();
+    for(let i = g.blockFrom; i <= g.blockTo; i++){
+      const b = blocks[i];
+      if(!b || b.type !== 'list' || (b.listType && OPTION_LIST.test(b.listType))) continue;
+      const lines = (b._lines || []).map(l => l.raw || '');
+      if(lines.length >= 2 && lines.every(t => LETTER_LABEL.test(t))) lettered.add(i);
+    }
+    if(lettered.size >= 2) g.items = g.items.filter(it => !lettered.has(it.blockIdx) && NUM_PREFIX.test(it.text));
   });
   return groups.map(g => {
-    g.isAnswer = g.box === 'answer' || ANS_HEADING.test(answerCue(g.title)) ||
-                 g.ancestry.some(a => ANS_HEADING.test(answerCue(a)));
+    // Two kinds of heading never introduce an answer key, whatever words they
+    // hold: one whose content is an exercise box ("A. Associez le problème à
+    // la solution" — "solution" is a trigger word, so the exercise was filed
+    // as an answer key and lost along with its real key), and one that sits
+    // INSIDE a note box (the "Notes culturelles" and "Résumé" tip boxes that
+    // end a chapter after its Corrigé, and so inherit the Corrigé ancestry —
+    // they were being handed out as the "answers" to vocabulary lists).
+    const notAnswer = g.box === 'exercise' || g.headBox === 'note';
+    g.isAnswer = !notAnswer && (g.box === 'answer' || ANS_HEADING.test(answerCue(g.title)) ||
+                 g.ancestry.some(a => ANS_HEADING.test(answerCue(a))));
     g.isExercise = !g.isAnswer && (g.box === 'exercise' ||
                  EX_HEADING.test(headingCue(g.title)) || g.ancestry.some(a => EX_HEADING.test(headingCue(a))));
     g.ord = exOrdinal(g.title);
@@ -1022,6 +1086,252 @@ function collectGroups(book){
   });
 }
 
+// Subject words for Rule 2b, leaving out the headings the two groups SHARE.
+// Siblings under one parent always share that parent's words, which proves
+// nothing about whether one answers the other: FIA3's "Méthode" (strategy
+// steps) and "Modèle" (a model exam answer) sit side by side under "Labo TEF",
+// matched on "labo"/"tef" plus a count of four each, and the strategy steps
+// became four questions with the model's lines as their answers.
+function topicWordsApart(g, other){
+  const p = g.parents || [], o = other.parents || [];
+  let shared = 0;
+  while(shared < p.length && shared < o.length && p[shared] === o[shared]) shared++;
+  const own = p.slice(Math.max(1, shared)).join(' ') + ' ' + g.title;
+  return new Set([...sectionWords(own)].filter(w => !GENERIC_HEADING_WORDS.has(w) && !TOPIC_GENERIC_WORDS.has(w)));
+}
+
+/* ---------------------------------------------------------------------------
+ * WHOLE-SET EXERCISES
+ * ---------------------------------------------------------------------------
+ * Some exercises are answered as one set, not line by line:
+ *   - matching ("Associez", "Relie", "Match", or a single lettered option
+ *     list): a line asked on its own is cut off from the options it has to be
+ *     matched with, and from the other lines whose options it uses up;
+ *   - sorting into categories ("Classez", "Catégorisez"): the key is laid out
+ *     by category ("Positif : généreux, honnête…"), so no single line has an
+ *     answer of its own — unless every line carries its own blank and the key
+ *     answers line by line, which stays line by line;
+ *   - putting a set in order: paired by position, the question "Il se brosse
+ *     les dents." got the answer "Il se réveille." — the first line of the
+ *     ORDERED list. Only when the key really is an order (a reordering of the
+ *     same lines, "C, E, A, D, B", lettered lines, or a key of another shape);
+ *     "Mettez les mots dans l'ordre", one scrambled sentence per line with one
+ *     sentence per answer, stays line by line;
+ *   - exercises with nothing to pair line by line at all: blanks inside a
+ *     dialogue's paragraphs, "find the five errors in this text", a key
+ *     printed as one sentence, or (exact title or ordinal only) a key whose
+ *     count differs from the question's.
+ * Such an exercise becomes ONE question, asked once the whole exercise has
+ * been read: the item points at the exercise's last readable block (as the
+ * Maya layout does), the panel shows the whole exercise (qHtml), and the
+ * answer is the whole answer group — shown, read aloud and compared as one.
+ */
+const SET_MATCH = /\b(?:associe[zr]?|associez-les|faites correspondre|fais correspondre|appariez|apparie[rz]?|match(?:es|ing)?)\b/i;
+// "Relie(z)" is matching when it links X TO Y ("Reliez chaque mot à sa
+// définition", "…aux activités"), not when it joins sentences WITH a word
+// ("Relie les deux phrases avec dans laquelle…", one rewritten sentence per
+// line). The first preposition after the verb decides. (The cue is
+// unaccented, so "à" arrives as "a".)
+function matchCue(cue){
+  if(SET_MATCH.test(cue)) return true;
+  const m = /\breli(?:e|ez|er)\b([\s\S]*)/i.exec(cue);
+  if(!m) return false;
+  const p = /\b(a|au|aux|avec)\b/i.exec(m[1]);
+  return !!p && p[1].toLowerCase() !== 'avec';
+}
+const SET_SORT  = /\b(?:classez|classer|classe (?:les|ces|chaque|ce)|categorisez|categoriser|categorise (?:les|ces)|categori[sz]e|classify|triez|trier|trie (?:les|ces)|rangez (?:les|ces|chaque)|regroupez|sort (?:the|these|each|them|into)|put (?:the|these|each) [a-z ]{0,30}(?:column|categor|group))\b/i;
+const SET_ORDER = /(?:dans l'ordre|dans le bon ordre|ordre (?:logique|chronologique)|\bin (?:the )?(?:right |correct |logical |chronological )?order\b|\breorder|\breordonne[zr]?\b)/i;
+const LETTER_LABEL = /^\s*\(?[a-zA-Z]\s*[.)]\s*\S/;
+const BLANK_MARK = /_{2,}|…|\.\.\.|\[\s*\]|\(\s*\)/;
+
+// The blocks a group owns, its headings left out.
+function groupBody(book, g){
+  const blocks = book.chapters[g.chapterIdx].blocks, out = [];
+  const to = g.blockTo == null ? blocks.length - 1 : g.blockTo;
+  for(let i = g.blockFrom; i <= to; i++){
+    const b = blocks[i];
+    if(b && b.type !== 'heading' && (b.html || '').trim()) out.push(i);
+  }
+  return out;
+}
+function blockPlain(bl){
+  const clean = t => String(t || '').replace(/\s+/g, ' ').trim();
+  if(bl.type === 'table') return (bl._rows || []).map(r => r.cells.map(clean).filter(Boolean).join(' — ')).filter(Boolean).join(' / ');
+  return (bl._lines || []).map(l => clean(l.raw)).filter(Boolean).join(bl.type === 'list' ? ' / ' : ' ');
+}
+// One source block -> one panel block, as qaBlockHtml does for the Maya books.
+function setBlockHtml(bl){
+  const h = String(bl.html || '').replace(/ data-seg="\d+"/g, '');
+  return h.trim() ? '<div class="exBlk' + (bl.type === 'table' ? ' rbTableWrap' : '') + '">' + h + '</div>' : '';
+}
+// The heading plus the instructions: the paragraphs before the exercise's
+// first list or table. Content further down is never read for keywords.
+function exerciseCue(book, g){
+  const blocks = book.chapters[g.chapterIdx].blocks, parts = [g.title];
+  for(const bi of groupBody(book, g)){
+    const b = blocks[bi];
+    if(b.type === 'list' || b.type === 'table') break;
+    if(b.type === 'p' && !NUM_PREFIX.test(blockPlain(b))) parts.push(blockPlain(b));
+  }
+  return headingCue(parts.join(' ')).replace(/[‘’ʼ]/g, "'");
+}
+// Lettered option pools: a list typed a/A/i/I, a list whose every line opens
+// with a letter label, or a table column whose every cell does (beside the
+// numbered column). A matching exercise has ONE; a multiple-choice exercise
+// has one per question. A lettered list that supplies ALL of the exercise's
+// lines is the exercise itself — parts a, b, c… — not a pool to choose from.
+function optionPools(book, g){
+  const blocks = book.chapters[g.chapterIdx].blocks;
+  let n = 0;
+  const lettered = new Set();
+  for(const bi of groupBody(book, g)){
+    const b = blocks[bi];
+    if(b.type === 'list'){
+      const lines = (b._lines || []).map(l => l.raw || '');
+      if(b.listType && OPTION_LIST.test(b.listType)) n++;
+      else if(lines.length >= 3 && lines.every(t => LETTER_LABEL.test(t))){ n++; lettered.add(bi); }
+    } else if(b.type === 'table'){
+      const rows = b._rows || [];
+      if(rows.length < 3) continue;
+      const cols = Math.max(...rows.map(r => r.cells.length));
+      for(let c = 1; c < cols; c++){
+        if(rows.every(r => LETTER_LABEL.test(String(r.cells[c] || '')))){ n++; break; }
+      }
+    }
+  }
+  if(lettered.size && !g.items.some(it => !lettered.has(it.blockIdx))) n -= lettered.size;
+  return n;
+}
+// "1 = d, 2 = f", "1, F; 2, B", "1-d", "1d": number-to-letter pairs. A key
+// starts at 1 and counts up, which is what keeps clock times out ("À 8h, 12h,
+// 16h et 20h" is three "pairs" too, with h for heures).
+function keyNumbers(text){
+  const re = /(?:^|[^\w])(\d{1,2})\s*(?:=|:|-|–|—|→|>|,)?\s*[a-jA-J](?![\w'’])/g;
+  const nums = new Set();
+  let m;
+  while((m = re.exec(String(text || '')))) nums.add(parseInt(m[1], 10));
+  return nums;
+}
+function mappingPairs(text){
+  const nums = keyNumbers(text);
+  return nums.has(1) && nums.has(2) && nums.has(3) ? nums.size : 0;
+}
+// "C, E, A, D, B", "2, 5, 4, 7, 1", "d → f → b", or letters with nothing but
+// spaces between them ("d c b e f a" — and the spoken text drops the arrows,
+// so "d → f → b" reaches this function as "d f b"): an order written as a key.
+const KEY_SEQUENCE = /(?:^|[^\w])(?:(?:[a-jA-J]|\d{1,2})(?:\s*(?:,|;|→|->|-|–|—|>)\s*(?:[a-jA-J]|\d{1,2})(?![\w'’])){2,}|[a-jA-J](?:\s+[a-jA-J](?![\w'’])){2,})/;
+const KEY_MAPPING = /(?:^|[^\w])\d{1,2}\s*(?:=|:|-|–|—|→|>|,)?\s*[a-jA-J](?:\s*[,;]\s*\d{1,2}\s*(?:=|:|-|–|—|→|>|,)?\s*[a-jA-J](?![\w'’])){2,}/;
+// Lines with nothing in them but a number and a blank ("1. …", the cells of
+// a sorting grid "… — 1. …"). They give no word to answer about, so in a
+// sorting or ordering exercise they are slots of ONE answer, not questions.
+function contentless(items){
+  return items.length > 0 && items.every(it => !/\p{L}{2,}/u.test(String(it.text || '')
+    .replace(NUM_PREFIX, '').replace(/_{2,}|…|\.\.\./g, ' ')));
+}
+function isPermutation(q, a){
+  const norm = t => normTitle(String(t || '').replace(NUM_PREFIX, '').replace(/^\s*\(?[a-zA-Z]\s*[.)]\s+/, ''));
+  const qs = q.items.map(i => norm(i.text)), as = a.items.map(i => norm(i.text));
+  if(qs.length < 3 || qs.length !== as.length) return false;
+  const have = new Set(qs);
+  return as.filter(t => have.has(t)).length >= Math.ceil(as.length * 0.6) && qs.join('|') !== as.join('|');
+}
+// An exercise done with the recording ("Play Script 3: write the four
+// sentences", "Écoute le script un et écris…"). Its script sits elsewhere in
+// the chapter, so asked as a whole set it could only interrupt the reading
+// with a question nobody can answer at that point. (A listening exercise that
+// prints its own questions line by line is unaffected.)
+const AUDIO_CUE = /\b(?:play script|script (?:\d+|un|deux|trois|quatre|cinq|six|sept|huit|neuf|dix|one|two|three|four|five|seven|eight|nine|ten)\b|ecoutez? le script|ecoutez? l'enregistrement|ecoutez? le document|listen to (?:the )?(?:script|recording|audio))/i;
+// 'match' | 'sort' | 'order' | 'whole' to ask the exercise as one set; 'skip'
+// for a whole set that needs the recording; null to pair it line by line.
+function setKind(book, q, a, rule){
+  if(rule === 'key') return null;                 // Rule 5 splits one key across exercises by number
+  const cue = exerciseCue(book, q);
+  if(q.items.length){
+    const aBlocks = book.chapters[a.chapterIdx].blocks;
+    const aText = groupBody(book, a).map(bi => blockPlain(aBlocks[bi])).join(' ');
+    const lettered = q.items.length >= 3 && q.items.every(i => LETTER_LABEL.test(i.text));
+    const empty = contentless(q.items);
+    if(SET_ORDER.test(cue) && (isPermutation(q, a) || KEY_SEQUENCE.test(aText) || lettered || empty ||
+                               a.items.length !== q.items.length)) return 'order';
+    if(SET_SORT.test(cue) && (empty || !(a.items.length === q.items.length && q.items.every(i => BLANK_MARK.test(i.text))))) return 'sort';
+    if(matchCue(cue) || optionPools(book, q) === 1 || mappingPairs(aText) >= 3) return 'match';
+    if(a.items.length === q.items.length) return null;
+    if(a.items.length && rule !== 'title' && rule !== 'ordinal') return null;
+    return AUDIO_CUE.test(cue) ? 'skip' : 'whole';
+  }
+  // No lines to pair at all: a set whatever it is, named from its instructions.
+  if(AUDIO_CUE.test(cue)) return 'skip';
+  return SET_ORDER.test(cue) ? 'order' : SET_SORT.test(cue) ? 'sort' : matchCue(cue) ? 'match' : 'whole';
+}
+// What "Identical to the book's answer" compares a whole-set answer with: the
+// compact key when the answer has one ("1 = d, 2 = f…", "C, E, A, D, B"),
+// otherwise nothing, and the reader falls back to the full answer text.
+// Read one block at a time, so a key can't run on into the next block's text
+// ("Ordre : d f b e a c g" followed by the list line "d. Le patient…").
+// A matching key comes out as "1d 2f 3b…" whichever way the book wrote it:
+// "1 = d, 2 = f", "1. c (…) 2. a (…)", or one key line per list item
+// ("d (s'enregistrer = to check in)", "chaleureux b) warm").
+function answerKeyOf(texts, items){
+  for(const text of texts){
+    const pairs = [], re = /(?:^|[^\w])(\d{1,2})\s*(?:[.)=:,>→–—-])?\s*([a-jA-J])(?![\w'’])/g;
+    let m;
+    while((m = re.exec(text))) pairs.push([parseInt(m[1], 10), m[2].toLowerCase()]);
+    if(pairs.length >= 3 && pairs.every((p, i) => p[0] === i + 1)) return pairs.map(p => p[0] + p[1]).join(' ');
+    const ms = KEY_SEQUENCE.exec(text);
+    if(ms) return ms[0].replace(/^[^\w]+/, '').trim();
+  }
+  if(items.length >= 3){
+    const letters = items.map(it => {
+      const t = String(it.text || '').replace(NUM_PREFIX, '');
+      const lead = /^\s*\(?([a-jA-J])(?:\s*[.):–—-]|\s+\()/.exec(t);
+      if(lead) return lead[1];
+      const tags = t.match(/(?:^|\s)\(?[a-jA-J](?:[.)](?=\s|$)|(?=\s+\())/g);
+      return tags && tags.length === 1 ? tags[0].replace(/[^a-jA-J]/g, '') : null;
+    });
+    if(letters.every(Boolean)) return letters.map((l, i) => (i + 1) + l.toLowerCase()).join(' ');
+  }
+  return null;
+}
+function commitWholeSet(book, stats, q, a, rule, kind){
+  const qBlocks = book.chapters[q.chapterIdx].blocks, aBlocks = book.chapters[a.chapterIdx].blocks;
+  const qBody = groupBody(book, q), aBody = groupBody(book, a);
+  // The reader asks once the item's block has been read, so point it at the
+  // exercise's LAST readable block: by then every line and option is read.
+  let anchor = -1;
+  for(let k = qBody.length - 1; k >= 0; k--){
+    const b = qBlocks[qBody[k]];
+    if(b.segs && b.segs.length){ anchor = qBody[k]; break; }
+  }
+  if(anchor < 0) return false;
+  const entry = { n: 1, whole: true, block: anchor, from: 0, to: qBlocks[anchor].segs.length - 1,
+                  q: qBody.map(bi => blockPlain(qBlocks[bi])).filter(Boolean).join(' ') };
+  const qHtml = qBody.map(bi => setBlockHtml(qBlocks[bi])).join('');
+  if(qHtml) entry.qHtml = qHtml;
+  const aText = aBody.map(bi => blockPlain(aBlocks[bi])).filter(Boolean).join(' ');
+  const aHtml = aBody.map(bi => setBlockHtml(aBlocks[bi])).join('');
+  if(aText && aHtml){
+    const aSegs = [];
+    aBody.forEach(bi => (aBlocks[bi].segs || []).forEach(sg => {
+      if(sg.text && sg.text.trim()) aSegs.push({ lang: sg.lang, text: sg.text });
+    }));
+    entry.a = aText; entry.aHtml = aHtml; entry.aSegs = aSegs;
+    const key = (kind === 'match' || kind === 'order')
+      ? answerKeyOf(aBody.map(bi => blockPlain(aBlocks[bi])), a.items) : null;
+    if(key) entry.aCmp = key;
+    stats.answered++;
+  }
+  const set = { title: q.title, match: rule, whole: kind, source: a.title, sourceCh: a.chapterIdx, items: [entry] };
+  if(q.items.length) set.lines = q.items.length;           // for the report: how many lines it replaces
+  const ch = book.chapters[q.chapterIdx];
+  (ch.exercises || (ch.exercises = [])).push(set);
+  stats.items++;
+  stats.sets++;
+  stats.whole = (stats.whole || 0) + 1;
+  stats.byRule[rule] = (stats.byRule[rule] || 0) + 1;
+  q._matched = true;
+  return true;
+}
+
 function answerPayload(text){
   const segs = LE.segmentLine(String(text || '').replace(/\s+/g,' ').trim(), null);
   // Exercise answers get the same treatment for SPEECH only: in the
@@ -1044,6 +1354,9 @@ function answerPayload(text){
 // picking the right group is necessary but not sufficient.
 function commitPair(book, stats, q, a, rule){
   a._used = true;
+  const kind = setKind(book, q, a, rule);
+  if(kind === 'skip') return false;
+  if(kind) return commitWholeSet(book, stats, q, a, rule, kind);
   const aItems = a.items;
   const bothNumbered = q.items.every(i => NUM_PREFIX.test(i.text)) &&
                        aItems.every(i => NUM_PREFIX.test(i.text));
@@ -1240,7 +1553,16 @@ async function attachExercises(book, opts){
   attachNumberedQA(book, stats);
   const groups = collectGroups(book);
   const answers = groups.filter(g => g.isAnswer && g.items.length);
-  if(!answers.length) return stats;
+  // WHOLE-SET exercises (see setKind) may have no items at all on one side: a
+  // dialogue with its blanks inside the paragraphs, "find the five errors in
+  // this text", a key printed as a sentence ("C, E, A, D, B.") or as labelled
+  // lines ("Positif : généreux, honnête…"). Such groups join the pools, but
+  // only an EXPLICIT key — identical title, letter + subject words, ordinal —
+  // may pair them, never the count-based guesses, and an item-less question
+  // must be an exercise in its own right.
+  const bare = new Set(groups.filter(g => !g.items.length && groupBody(book, g).length));
+  const pool = answers.concat(groups.filter(g => g.isAnswer && bare.has(g)));
+  if(!pool.length) return stats;
   // With --ai-pairing / --export-unmatched, hand the model (or the worksheet)
   // every non-answer group that has items, not just the ones EX_HEADING
   // recognised — a human decides an exercise by where it sits in the
@@ -1261,15 +1583,31 @@ async function attachExercises(book, opts){
   // guess — it just gives them something to check in the first place. Rule 4
   // (the one actual guess — nearest unclaimed neighbor) stays restricted to
   // g.isExercise regardless, so widening never reaches it.
-  const questions = groups.filter(g => !g.isAnswer && g.items.length &&
+  const questions = groups.filter(g => !g.isAnswer && (g.items.length ?
     (g.isExercise ||
      h1sWithAnswers.has(book.chapters[g.chapterIdx].h1) ||
-     answers.some(a => a.norm && a.norm === g.norm)));
+     answers.some(a => a.norm && a.norm === g.norm))
+    : g.isExercise && bare.has(g)));
+  // Exact-title twins belong to each other. A question whose heading repeats
+  // an answer heading (or the reverse) is never handed to anyone else by the
+  // count-based rules, even when its twin has nothing they could pair item by
+  // item. Without this, TEF's "6. Remets dans l'ordre", whose key is a
+  // sentence, took the five answers of "7. Jeu de rôle" because the counts
+  // agreed, and the "Son et écoute" pronunciation lists took the answers of
+  // "6. Écoute active" through the shared word "écoute" — wrong answers in
+  // one place, none in the other.
+  // (Same length floor as Rule 1: a bare "A." is not a title.)
+  const twinKey = g => book.chapters[g.chapterIdx].h1 + '\u0001' + g.norm;
+  const titled = g => g.norm && g.norm.length > 3;
+  const qTwins = new Set(groups.filter(g => !g.isAnswer && titled(g)).map(twinKey));
+  const aTwins = new Set(groups.filter(g => g.isAnswer && titled(g)).map(twinKey));
 
   const leftover = [];
   for(const q of questions){
     const candidates = [];
-    for(const a of answers){
+    const qBare = !q.items.length;
+    const qReserved = titled(q) && aTwins.has(twinKey(q));
+    for(const a of pool){
       if(a.chapterIdx < q.chapterIdx) continue;          // answers follow questions
       // Every rule is scoped to the enclosing h1. Without this, an exercise
       // whose own answer key is missing reached hundreds of chapters forward
@@ -1298,7 +1636,7 @@ async function attachExercises(book, opts){
         // subject words to overlap on. Same letter, same section and the same
         // number of items is then all the evidence there can be — and there is
         // nothing in the heading that could contradict it.
-        if(a.info.size === 0 && a.items.length === q.items.length){
+        if(a.info.size === 0 && a.items.length && a.items.length === q.items.length){
           candidates.push({ a:a, rule:'letter', score:0, dist: a.chapterIdx - q.chapterIdx }); continue;
         }
       }
@@ -1306,6 +1644,10 @@ async function attachExercises(book, opts){
       if(q.ord && a.ord === q.ord){
         candidates.push({ a:a, rule:'ordinal', dist: a.chapterIdx - q.chapterIdx }); continue;
       }
+      // Everything below decides on item counts, so it needs items on both
+      // sides, and it never touches a group whose exact-title twin exists.
+      if(qBare || !a.items.length) continue;
+      if(qReserved || qTwins.has(twinKey(a))) continue;
       // Rule 2b — neither side carries a letter at all ("Entraînement
       // (Practice)" -> "Grammaire : entraînement", "Production orale" ->
       // "Production orale : exemples de réponses"), so there is no letter to
@@ -1315,7 +1657,7 @@ async function attachExercises(book, opts){
       // still subject to the same top-score-only, no-ambiguity filtering as
       // the letter rule below.
       if(!q.letter && !q.ord && !a.letter && !a.ord && a.items.length === q.items.length){
-        const score = overlapCount(q.topicInfo, a.topicInfo);
+        const score = overlapCount(topicWordsApart(q, a), topicWordsApart(a, q));
         if(score > 0){
           candidates.push({ a:a, rule:'topic', score:score, dist: a.chapterIdx - q.chapterIdx }); continue;
         }
@@ -1587,8 +1929,9 @@ async function aiPairGroups(questionGroups, answerGroups, opts){
 
 function stripBuildScaffolding(book){
   for(const ch of book.chapters){
-    for(const bl of ch.blocks){ delete bl._lines; delete bl._rows; delete bl._header; delete bl.chapterTitle; }
+    for(const bl of ch.blocks){ delete bl._lines; delete bl._rows; delete bl._header; delete bl.chapterTitle; delete bl._start; }
     delete ch._qaPaired;
+    delete ch._headBox;
   }
 }
 
@@ -1638,6 +1981,17 @@ if(require.main === module){
           ex.push('  SET: '+set.title);
           ex.push('       matched by: '+set.match+'   from answer group: '+(set.source||'?')
             +'  [chapter '+(set.sourceCh+1)+']');
+          if(set.whole){
+            // One question for the whole exercise (see setKind).
+            ex.push('       asked as ONE whole set ('+set.whole+')'
+              +(set.lines ? ' instead of '+set.lines+' separate lines' : ''));
+            set.items.forEach(it => {
+              ex.push('    WHOLE  '+it.q);
+              ex.push('      A    '+(it.a !== undefined ? it.a : '*** NO ANSWER FOUND ***'));
+              if(it.aCmp) ex.push('      KEY  '+it.aCmp);
+            });
+            return;
+          }
           set.items.forEach(it => {
             ex.push('    Q'+it.n+'  '+it.q);
             ex.push('      A   '+(it.a !== undefined ? it.a : '*** NO ANSWER FOUND ***'));
@@ -1774,6 +2128,7 @@ if(require.main === module){
         console.log('      exercises: '+x.sets+' sets'
           + (x.items ? ', '+x.items+' questions, '+x.answered+' with an answer from the book ('
                         +(100*x.answered/x.items).toFixed(1)+'%)' : '')
+          + (x.whole ? ', '+x.whole+' of them asked as one whole set' : '')
           + (byRule ? '  ['+byRule+']' : '')
           + (x.unmatched ? '; '+x.unmatched+' left unmatched'
                             +(x.sets ? '' : ' (rules found 0 candidates for any of them \u2014 try --export-unmatched)') : ''));
