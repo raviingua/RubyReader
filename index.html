@@ -499,6 +499,9 @@
     <div class="field" id="colsField" style="display:none"><label>Columns <span style="text-transform:none;color:var(--dim)">(book mode)</span></label>
       <div class="seg" id="colsSeg"><button data-v="1" class="sel">1</button><button data-v="2">2</button><button data-v="3">3</button><button data-v="4">4</button></div>
     </div>
+    <div class="field" id="pageField" style="display:none"><label>Page turning <span style="text-transform:none;color:var(--dim)">(book mode)</span></label>
+      <div class="seg" id="pageSeg"><button data-v="auto" class="sel">Auto</button><button data-v="manual">Manual</button></div>
+    </div>
     <div class="row"><button class="btn" id="loadChapterBtn" disabled>Load chapter &amp; read</button></div>
     <p class="err" id="err"></p>
     <p class="hint" id="libNote" style="margin-top:-6px"></p>
@@ -560,7 +563,7 @@
     <div class="field">
       <button class="pill" id="clearCacheBtn" style="align-self:flex-start;padding:10px 16px">Clear remembered settings</button>
       <p class="hint">Forgets the settings this page remembers between visits (language buttons, speeds,
-        pauses, voices, theme and colours, exercise mode, exercise position, GL order, scroll view, full screen, and where you were reading) and starts again
+        pauses, voices, theme and colours, exercise mode, exercise position, GL order, scroll view, page turning, full screen, and where you were reading) and starts again
         from the defaults. Your passphrase and text sizes are not touched.</p>
     </div>
   </section>
@@ -591,6 +594,7 @@
           <button class="pill" id="tintBtn" title="Colour the French fragments so the language switching is visible">Tint: Off</button>
           <button class="pill" id="glossBtn" title="Show or hide the ruby glosses. They are never read aloud either way.">Glosses: On</button>
           <button class="pill" id="colsBtn" style="display:none" title="Number of columns in book mode">Cols: 1</button>
+          <button class="pill" id="pageModeBtn" style="display:none" title="Auto: the page turns with the reading, and turning it yourself moves the reading to that page. Manual: you turn the pages and the reading never moves them.">Pages: Auto</button>
           <button class="pill" id="viewBtn" title="Show the whole chapter instead of one block at a time. Reading is unchanged.">View: Block</button>
           <button class="pill" id="exModeBtn" title="At each exercise question, stop and let you type an answer, then show the book&#39;s">Exercise: Off</button>
           <button class="pill" id="autoNextBtn" title="When a chapter ends, roll straight into the next one instead of stopping">Auto&#8209;chapter: On</button>
@@ -1053,15 +1057,21 @@
 
   // ---- reading mode / columns, chosen before the chapter opens ----
   var setupMode='scroll', setupCols=1;
+  var pageAuto=true;    // book mode: Auto page turning (the default) or Manual
+  function modeHintText(){
+    if(setupMode!=='book') return 'Scroll: one block at a time, or the whole chapter, scrolling as usual.';
+    return 'Book: the chapter set in columns, one screenful at a time. Turn pages with the arrow keys, or a double-tap at the left or right of the page. '
+      + (pageAuto ? 'Auto: the page turns as the reading reaches the next one, and turning it yourself moves the reading to that page.'
+                  : 'Manual: pages never turn on their own.');
+  }
   seg('modeSeg', function(v){
     setupMode=v;
     // Each mode shows its own layout choice: Block/Chapter for scroll, the
     // column count for book (which is always whole-chapter).
     $('colsField').style.display = (v==='book') ? '' : 'none';
     $('viewField').style.display = (v==='book') ? 'none' : '';
-    $('modeHint').textContent = (v==='book')
-      ? 'Book: the chapter set in columns, one screenful at a time. Turn pages with the arrow keys, or a double-tap at the left or right of the page. Pages never turn on their own.'
-      : 'Scroll: one block at a time, or the whole chapter, scrolling as usual.';
+    $('pageField').style.display = (v==='book') ? '' : 'none';
+    $('modeHint').textContent = modeHintText();
   });
   // Applied at once rather than only on the next chapter open: with the old
   // code, changing this after a book was already open did nothing at all,
@@ -1097,6 +1107,17 @@
     page=0;
     if(bookMode) applyBookMode(false); else $('colsBtn').textContent='Cols: '+cols;
   });
+  // Auto / Manual page turning: the setup field and the pill in the reader are one setting.
+  function applyPageModeBtn(){ $('pageModeBtn').textContent='Pages: '+(pageAuto?'Auto':'Manual'); }
+  function setPageAuto(on){
+    pageAuto=!!on;
+    applyPageModeBtn();
+    segSelect('pageSeg', pageAuto ? 'auto' : 'manual');
+    $('modeHint').textContent = modeHintText();
+    if(pageAuto) syncOnAuto();
+  }
+  seg('pageSeg', function(v){ setPageAuto(v==='auto'); });
+  $('pageModeBtn').addEventListener('click', function(){ setPageAuto(!pageAuto); });
 
   if(window.matchMedia){ try{ window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change',function(){ if(appTheme==='auto')applyAppTheme(); }); }catch(e){} }
   applyAppTheme();
@@ -1615,6 +1636,7 @@
      whole point of the mode: to be able to follow along, or look at the
      opposite page, without the layout moving under you. */
   var bookMode=false, cols=1, page=0, pageCount=1;
+  var pendingSeg=null;   // Auto: the line a page turn has queued up inside its block
 
   /* ---- pagination ----
      The first version leaned on multi-column "overflow columns": give the box
@@ -1702,16 +1724,37 @@
     if(el.scrollLeft !== left) el.scrollLeft=left;
     updatePageInd();
   }
-  function nextPage(){ if(bookMode) showPage(page+1, true); }
-  function prevPage(){ if(bookMode) showPage(page-1, true); }
-  // Which page the block being read is on — used only to label the "reading"
-  // button, never to move the page by itself.
-  function readingPage(){
-    var el=$('blockEl');
+  /* ---- Auto / Manual page turning ----
+     Manual (pageAuto false) is how book mode always worked: you turn the pages,
+     the reader never does, and the voice can be on another page than the one in
+     front of you. Auto (the default) keeps the two together: the page turns
+     when the reading moves onto the next one (see highlightUnit), and when you
+     turn a page yourself the reading moves to the top of it, playing on from
+     there if it was playing and waiting there if it was not. */
+  function nextPage(){ turnPage(page+1); }
+  function prevPage(){ turnPage(page-1); }
+  function turnPage(n){
+    if(!bookMode) return;
+    var was=page;
+    showPage(n, true);
+    if(pageAuto && page!==was) seekToPage(page);
+  }
+  // The line the reading cursor is on: the one being spoken (or paused on),
+  // else the one a page turn has queued up, else the block itself.
+  function cursorEl(){
+    var b=$('blockEl'); if(!b) return null;
+    var seg = (units && units[unitIdx]) ? units[unitIdx].i : pendingSeg;
+    var s = (seg!=null) ? b.querySelector('.ttsSeg[data-seg="'+seg+'"]') : null;
+    return s || b;
+  }
+  function pageOfEl(el){
     if(!el || !bookMode || pageStep<=1) return -1;
     var x=el.getBoundingClientRect().left-$('textInner').getBoundingClientRect().left;
     return Math.max(0, Math.floor(x/pageStep));
   }
+  // Which page the reading is on. Labels the "reading" button; in Auto it also
+  // decides where the page goes. In Manual it never moves the page by itself.
+  function readingPage(){ return pageOfEl(pageAuto ? cursorEl() : $('blockEl')); }
   function updatePageInd(){
     if(!bookMode) return;
     $('pageNum').textContent=(page+1)+' / '+pageCount;
@@ -1726,10 +1769,55 @@
     var rp=readingPage();
     if(rp>=0) showPage(rp, true);
   });
+  // The first line that STARTS on page p, as {blk, seg}: the first audible one
+  // at or after it (a muted language is skipped). seg is null when that line
+  // opens its block.
+  function firstLineOnPage(p){
+    if(pageStep<=1) return null;
+    var spans=$('textInner').querySelectorAll('.ttsSeg');
+    var lo=0, hi=spans.length;                 // first span whose page is >= p
+    while(lo<hi){ var mid=(lo+hi)>>1; if(pageOfEl(spans[mid])>=p) hi=mid; else lo=mid+1; }
+    if(lo>=spans.length) return null;
+    var bEl=spans[lo].closest('.rbBlock'); if(!bEl) return null;
+    var blk=parseInt(bEl.getAttribute('data-blk'),10), seg=parseInt(spans[lo].getAttribute('data-seg'),10);
+    if(isNaN(blk) || isNaN(seg)) return null;
+    for(var b=blk; b<blocks.length; b++){
+      var us=buildUnits(blocks[b]);
+      for(var k=0;k<us.length;k++){
+        if(b>blk || us[k].i>=seg) return { blk:b, seg:(b===blk ? us[k].i : null) };
+      }
+    }
+    return null;
+  }
+  // Auto, after the page was turned by hand: the reading goes to the top of
+  // that page, and plays on from there if it was playing.
+  function seekToPage(p){
+    var t=firstLineOnPage(p); if(!t) return;
+    var wasPlaying=playing && !paused, single=(playMode==='single');
+    stop();                                    // silence at once, whatever follows
+    idx=t.blk; pendingSeg=t.seg;
+    if(wasPlaying) play(single); else renderBlock();
+  }
+  // Switching to Auto while the two disagree: if the audio is running the page
+  // catches up to it; if nothing is running the reading moves to your page.
+  function syncOnAuto(){
+    if(!bookMode || !pageAuto) return;
+    var rp=readingPage();
+    if(rp<0 || rp===page) return;
+    if(playing && !paused) showPage(rp, true); else seekToPage(page);
+  }
+  // After a re-layout (text size, columns, window size) the same text may sit
+  // on a different page, so in Auto the page is put back on the reading.
+  function syncPageToCursor(){
+    if(!bookMode || !pageAuto) return;
+    var rp=readingPage();
+    if(rp>=0 && rp!==page) showPage(rp, false);
+  }
   function applyBookMode(keepPage){
     $('textDisplay').classList.toggle('bookMode', bookMode);
     $('stage').classList.toggle('bookOn', bookMode);
     $('colsBtn').style.display = bookMode ? '' : 'none';
+    $('pageModeBtn').style.display = bookMode ? '' : 'none';
     if(typeof syncTopPad==='function') setTimeout(syncTopPad, 0);
     $('colsBtn').textContent='Cols: '+cols;
     segSelect('colsSeg', String(cols));
@@ -1738,7 +1826,7 @@
     // Re-measure AFTER the browser has applied the new column count — reading
     // geometry in the same tick returns the previous layout, which is why a
     // column change sometimes appeared not to take effect at all.
-    var go=function(){ layoutPages(); showPage(keepPage ? page : 0, false); };
+    var go=function(){ layoutPages(); showPage(keepPage ? page : 0, false); if(keepPage) syncPageToCursor(); };
     layoutPages();
     showPage(keepPage ? page : 0, false);
     if(window.requestAnimationFrame) window.requestAnimationFrame(go);
@@ -1941,6 +2029,8 @@
     // across a <strong> boundary), so every span carrying the index lights up.
     var spans=el.querySelectorAll('.ttsSeg[data-seg="'+unit.i+'"]');
     for(var i=0;i<spans.length;i++) spans[i].classList.add('speaking');
+    // Book mode, Auto: the page turns when the reading reaches the next one.
+    if(bookMode && pageAuto && spans.length){ var pg=pageOfEl(spans[0]); if(pg>=0 && pg!==page) showPage(pg, true); }
     // Keep the spoken line in view in a block too tall for the screen (long
     // vocabulary tables, mostly).
     // Only in single-block view, where the block was just rendered at the top
@@ -2163,6 +2253,10 @@
     if(!playing) return;
     var b=blocks[idx]; if(!b){ stop(); return; }
     units=buildUnits(b); unitIdx=0; repeatsLeft=repeatCount; lastSpokenLang=null;
+    if(pendingSeg!=null){                      // started from a page turn: begin at that line
+      for(var q=0;q<units.length;q++){ if(units[q].i>=pendingSeg){ unitIdx=q; break; } }
+      pendingSeg=null;
+    }
     if(!units.length){
       // Nothing audible in this block. If BOTH languages are muted that's
       // true of every block, so racing silently to the end of the chapter
@@ -2258,7 +2352,7 @@
     var ep=$('exPanel'); if(ep) ep.classList.remove('on');
     var rd=$('reader'); if(rd) rd.classList.remove('exOpen');
     playing=false; paused=false; activeChunk=null;
-    units=null; unitIdx=0; repeatsLeft=0; lastSpokenLang=null;
+    units=null; unitIdx=0; repeatsLeft=0; lastSpokenLang=null; pendingSeg=null;
     clearTimeout(gapTimer);
     clearTimeout(fallbackTimer); fallbackDeadline=null;
     if(hasTTS){ try{ window.speechSynthesis.cancel(); }catch(e){} }
@@ -2415,6 +2509,7 @@
       theme:appTheme,
       palette:(bg===def[0] && tx===def[1]) ? null : [bg,tx],   // only a custom pick; the default follows the theme
       ex:exMode,
+      pageAuto:pageAuto,                        // book mode: Auto / Manual page turning
       exPos:exPos,                              // exercise panel: 'top', 'middle' or 'bottom'
       glFirst:glFirst,
       view:setupView,                           // scroll-mode view: 'block' or 'chapter'
@@ -2470,6 +2565,7 @@
       if(Array.isArray(s.palette) && /^#[0-9a-f]{6}$/i.test(s.palette[0]) && /^#[0-9a-f]{6}$/i.test(s.palette[1])) applyPalette(s.palette[0],s.palette[1]);
       if(typeof s.ex==='boolean'){ exMode=s.ex; applyExModeBtn(); updateRbNote(); }
       if(s.exPos==='top' || s.exPos==='middle' || s.exPos==='bottom'){ exPos=s.exPos; segSelect('exPosSeg', exPos); applyExPos(); }
+      if(typeof s.pageAuto==='boolean') setPageAuto(s.pageAuto);
       if(typeof s.fs==='boolean' && s.fs){ controlsHidden=true; applyHidden(); }
       if(typeof s.glFirst==='boolean') glFirst=s.glFirst;
       applyGlOrderBtn();   // label from both saved flags (GL Last / First / Off)
