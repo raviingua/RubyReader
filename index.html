@@ -188,11 +188,21 @@
   .rbBlock{font-family:var(--readFont);
     font-size:var(--readSize);line-height:1.55;text-align:left;
     font-style:normal}
-  /* In-content sub-headings (source ###–######); levels get progressively
-     less shouty, since level 4+ is used for short call-outs ("Attention !"). */
+  /* In-content sub-headings (source ###–######). Levels still get progressively
+     less shouty (level 4+ is used for short call-outs like "Attention !"), but
+     NO level may be smaller than the body text. Every size here is an em of the
+     block's own font-size (= --readSize, which already includes T+/T-), so 1em
+     is the floor and headings follow the text size when it changes. Quieter
+     levels are toned down with caps / spacing / opacity, never with size. */
   .rbHeading{font-weight:700}
   .rbHeading.lvl3{font-size:1.05em}
-  .rbHeading.lvl4,.rbHeading.lvl5,.rbHeading.lvl6{font-size:.85em;text-transform:uppercase;letter-spacing:.4px;opacity:.8}
+  .rbHeading.lvl4,.rbHeading.lvl5,.rbHeading.lvl6{font-size:1em;text-transform:uppercase;letter-spacing:.4px;opacity:.8}
+  /* Should a heading ever arrive as a real <h1>-<h6> element inside a block, it
+     must not pick up the page's own h1 size (24px, defined above for the setup
+     title) or the browser's tiny default h5/h6 sizes: it takes the size of the
+     block it sits in, i.e. the text size. */
+  .rbBlock h1,.rbBlock h2,.rbBlock h3,.rbBlock h4,.rbBlock h5,.rbBlock h6{
+    font-size:1em;font-weight:700;letter-spacing:inherit}
   /* Source blockquotes. In the parallel-text app a blockquote meant "the
      English translation of the block above"; here it means nothing more than
      "this was indented in the source", so it's shown indented and nothing
