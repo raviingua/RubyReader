@@ -601,7 +601,9 @@ function buildListBlock(el, ctx){
     const from = counter.n;
     const inner = renderSegs(segmentTokens(inlineTokens(li, [], 'plain'), ctx.seed, liForce), counter, segs);
     html += '<li>' + inner + '</li>';
-    lines.push({ raw: flowSpeechOf(li), segFrom: from, segTo: counter.n - 1 });
+    // html: the line exactly as the page shows it (bold, respellings), so an
+    // answer key can hand its own rendering to the exercise panel.
+    lines.push({ raw: flowSpeechOf(li), segFrom: from, segTo: counter.n - 1, html: inner });
   }
   html += '</'+(ordered ? 'ol' : 'ul')+'>';
   if(!segs.length && !lines.length) return null;
@@ -937,7 +939,7 @@ function itemsFromBlock(bl, blockIdx){
     return (bl._lines || []).map((ln, i) => {
       const m = NUM_PREFIX.exec(ln.raw);
       return { num: m ? parseInt(m[1],10) : (first+i), pos: i+1, blockIdx: blockIdx,
-               segFrom: ln.segFrom, segTo: ln.segTo, text: ln.raw };
+               segFrom: ln.segFrom, segTo: ln.segTo, text: ln.raw, html: ln.html };
     });
   }
   if(bl.type === 'p'){
@@ -1347,6 +1349,29 @@ function answerPayload(text){
   };
 }
 
+// A list answer keeps the page's own rendering. Rebuilt from its plain text
+// (answerPayload), the panel lost the bold that marks the answer word, and the
+// respellings shown in a pronunciation answer were read aloud. The page has
+// already done the work: its HTML for the line, and its segments for the line
+// — each with the voice the page chose, the respellings left silent. A line
+// that opens with a typed number, or that has no segments of its own, keeps
+// the plain-text payload.
+function answerItemPayload(book, a, ans){
+  if(ans.html == null || NUM_PREFIX.test(ans.text || '')) return null;
+  const ch = book.chapters[a.chapterIdx];
+  const bl = ch && ch.blocks ? ch.blocks[ans.blockIdx] : null;
+  if(!bl || bl.type !== 'list' || !bl.segs) return null;
+  const segs = [];
+  for(let i = ans.segFrom; i <= ans.segTo; i++){
+    const sg = bl.segs[i];
+    if(sg && sg.text && sg.text.trim()) segs.push({ lang: sg.lang, text: sg.text });
+  }
+  const html = String(ans.html).replace(/ data-seg="\d+"/g, '').trim();
+  const text = String(ans.text || '').replace(/\s+/g, ' ').trim();
+  if(!segs.length || !html || !text) return null;
+  return { html: html, text: text, segs: segs };
+}
+
 // Pair one question group's items against one answer group's items, and if
 // that succeeds, record the set on its chapter and fold the counts into
 // stats. Shared by the deterministic rules and the AI fallback below, so
@@ -1379,7 +1404,7 @@ function commitPair(book, stats, q, a, rule){
                     q: speechText(it.text) };
     const ans = lookup(it, ix);
     if(ans && ans.text){
-      const pay = answerPayload(ans.text.replace(NUM_PREFIX, ''));
+      const pay = answerItemPayload(book, a, ans) || answerPayload(ans.text.replace(NUM_PREFIX, ''));
       if(pay.text){ entry.a = pay.text; entry.aHtml = pay.html; entry.aSegs = pay.segs; stats.answered++; }
     }
     set.items.push(entry);
